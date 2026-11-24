@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -164,6 +165,14 @@ func newFakeDD(t *testing.T) *fakeDD {
 			w.Write(f.bodyFR)
 		case f.legacy && r.URL.Path == "/citypage_weather/xml/ON/s0000458_e.xml":
 			w.Write(f.body)
+		case r.URL.Path == "/today/citypage_weather/docs/site_list_en.csv",
+			r.URL.Path == "/today/citypage_weather/docs/site_list_fr.csv":
+			b, err := os.ReadFile("testdata/eccc/" + path.Base(r.URL.Path))
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			w.Write(b)
 		default:
 			http.NotFound(w, r)
 		}

@@ -18,6 +18,9 @@ type Server struct {
 	App         *App
 	PollTimeout time.Duration // long-poll limit, about 25 s
 	Renderer    *Renderer     // nil: one using App.Icons
+	Sites       *SiteList     // ECCC site search for the settings page
+	// AdminPassword, if set, protects /settings and /api/admin/* (HTTP Basic auth).
+	AdminPassword string
 
 	frames *frameCache
 
@@ -28,6 +31,9 @@ type Server struct {
 }
 
 func (s *Server) Handler() http.Handler {
+	if s.Sites == nil {
+		s.Sites = NewSiteList("")
+	}
 	if s.Renderer == nil {
 		s.Renderer = NewRenderer(NewIconImages(s.App.Icons).Get)
 	}
@@ -39,6 +45,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/state", s.state)
 	mux.HandleFunc("POST /api/tap", s.tap)
 	mux.HandleFunc("POST /api/toggle", s.toggle)
+	mux.HandleFunc("GET /settings", s.admin(s.settingsPage))
+	mux.HandleFunc("GET /api/admin/config", s.admin(s.getConfig))
+	mux.HandleFunc("PUT /api/admin/config", s.admin(s.putConfig))
+	mux.HandleFunc("GET /api/admin/entities", s.admin(s.entities))
+	mux.HandleFunc("POST /api/admin/test-ha", s.admin(s.testHA))
+	mux.HandleFunc("GET /api/admin/eccc-sites", s.admin(s.ecccSites))
 	return mux
 }
 
@@ -177,6 +189,7 @@ func (s *Server) framePNG(w http.ResponseWriter, r *http.Request) {
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Version", strconv.FormatUint(version, 10))
 	h.Set("X-Language", snap.Language)
+	h.Set("X-Rotation", strconv.Itoa(snap.Display.Rotation))
 	if !debug && s.flashDue(since == 0, snap.Display.FlashMinutes) {
 		h.Set("X-Refresh", "full")
 	}
@@ -245,6 +258,10 @@ func (s *Server) tap(w http.ResponseWriter, r *http.Request) {
 var debugHTML []byte
 
 func (s *Server) debugPage(w http.ResponseWriter, r *http.Request) {
+	if s.App.Config.Get().SetupMode() {
+		http.Redirect(w, r, "/settings", http.StatusFound)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(debugHTML)

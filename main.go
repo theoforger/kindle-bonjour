@@ -6,12 +6,14 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,18 +29,30 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err := seedConfig(store, os.Getenv); err != nil {
+		log.Fatal(err)
+	}
+	password, err := adminPassword(os.Getenv)
+	if err != nil {
+		log.Fatal(err)
+	}
 	app := NewApp(store, NewWeatherService(), NewIconCache(filepath.Join(*dataDir, "icons")))
 	if store.Get().SetupMode() {
-		log.Printf("no Home Assistant config yet: setup mode")
+		log.Printf("no Home Assistant config yet: setup mode, open /settings")
+	}
+	if password == "" {
+		log.Printf("settings page has no password (set ADMIN_PASSWORD_FILE or ADMIN_PASSWORD)")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go app.Run(ctx)
 
+	handler := (&Server{App: app, PollTimeout: 25 * time.Second,
+		Sites: NewSiteList(*dataDir), AdminPassword: password}).Handler()
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           (&Server{App: app, PollTimeout: 25 * time.Second}).Handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      40 * time.Second, // longer than the long-poll
 		IdleTimeout:       120 * time.Second,
@@ -61,4 +75,32 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// seedConfig writes a first config from HA_URL and HA_TOKEN when there is
+// no config file yet. Once a config exists the environment is ignored, so
+// the settings page stays in charge.
+func seedConfig(store *ConfigStore, env func(string) string) error {
+	u, tok := strings.TrimSpace(env("HA_URL")), strings.TrimSpace(env("HA_TOKEN"))
+	if store.Exists() || (u == "" && tok == "") {
+		return nil
+	}
+	if err := store.Update(func(c *Config) error { c.HA = HAConfig{URL: u, Token: tok}; return nil }); err != nil {
+		return fmt.Errorf("seed config from HA_URL/HA_TOKEN: %w", err)
+	}
+	log.Printf("wrote a first config from HA_URL/HA_TOKEN")
+	return nil
+}
+
+// adminPassword reads ADMIN_PASSWORD_FILE (a Docker secret), else
+// ADMIN_PASSWORD. Empty means no password.
+func adminPassword(env func(string) string) (string, error) {
+	if f := env("ADMIN_PASSWORD_FILE"); f != "" {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return "", fmt.Errorf("ADMIN_PASSWORD_FILE: %w", err)
+		}
+		return strings.TrimRight(string(b), "\r\n"), nil
+	}
+	return env("ADMIN_PASSWORD"), nil
 }

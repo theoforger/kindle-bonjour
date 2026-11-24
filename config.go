@@ -80,11 +80,25 @@ func (c Config) clone() Config {
 	return c
 }
 
+// ValidationError is a config value the server can't use. Key is a
+// message key the settings page translates; Arg names the bad value
+// (an entity ID) when there is one.
+type ValidationError struct {
+	Key, Arg, Msg string
+}
+
+func (e *ValidationError) Error() string { return e.Msg }
+
+func verr(key, arg, msg string) error { return &ValidationError{Key: key, Arg: arg, Msg: msg} }
+
+// ErrConfigConflict means the config changed since the version the caller read.
+var ErrConfigConflict = errors.New("config changed since it was loaded")
+
 // Validate normalizes c in place and rejects values the server can't use.
 func (c *Config) Validate() error {
 	c.HA.URL = strings.TrimRight(strings.TrimSpace(c.HA.URL), "/")
 	if c.HA.URL != "" && !strings.HasPrefix(c.HA.URL, "http://") && !strings.HasPrefix(c.HA.URL, "https://") {
-		return fmt.Errorf("home_assistant.url must start with http:// or https://")
+		return verr("invalid_url", "", "home_assistant.url must start with http:// or https://")
 	}
 	seen := map[string]bool{}
 	for i := range c.Entities {
@@ -92,10 +106,10 @@ func (c *Config) Validate() error {
 		e.ID = strings.TrimSpace(e.ID)
 		e.Name = strings.TrimSpace(e.Name)
 		if !validEntityID(e.ID) {
-			return fmt.Errorf("invalid entity id %q", e.ID)
+			return verr("invalid_entity", e.ID, fmt.Sprintf("invalid entity id %q", e.ID))
 		}
 		if seen[e.ID] {
-			return fmt.Errorf("duplicate entity %q", e.ID)
+			return verr("duplicate_entity", e.ID, fmt.Sprintf("duplicate entity %q", e.ID))
 		}
 		seen[e.ID] = true
 	}
@@ -110,33 +124,33 @@ func (c *Config) Validate() error {
 		c.Language = LangEN
 	case LangEN, LangFR:
 	default:
-		return fmt.Errorf("language must be en or fr")
+		return verr("invalid_language", "", "language must be en or fr")
 	}
 	if c.ECCC.RefreshSeconds == 0 {
 		c.ECCC.RefreshSeconds = 600
 	}
 	if c.ECCC.RefreshSeconds < 60 {
-		return fmt.Errorf("eccc.refresh_seconds must be at least 60")
+		return verr("invalid_refresh", "", "eccc.refresh_seconds must be at least 60")
 	}
 	switch c.Display.Rotation {
 	case 0, 90, 180, 270:
 	default:
-		return fmt.Errorf("display.rotation must be 0, 90, 180 or 270")
+		return verr("invalid_rotation", "", "display.rotation must be 0, 90, 180 or 270")
 	}
 	if c.Display.Split == 0 {
 		c.Display.Split = 0.55
 	}
 	if c.Display.Split < 0.3 || c.Display.Split > 0.8 {
-		return fmt.Errorf("display.split must be between 0.3 and 0.8")
+		return verr("invalid_split", "", "display.split must be between 0.3 and 0.8")
 	}
 	if c.Display.Columns == 0 {
 		c.Display.Columns = 2
 	}
 	if c.Display.Columns < 1 || c.Display.Columns > 4 {
-		return fmt.Errorf("display.columns must be between 1 and 4")
+		return verr("invalid_columns", "", "display.columns must be between 1 and 4")
 	}
 	if c.Display.FlashMinutes < 0 {
-		return fmt.Errorf("display.flash_minutes must not be negative")
+		return verr("invalid_flash", "", "display.flash_minutes must not be negative")
 	}
 	return nil
 }
@@ -176,6 +190,12 @@ type ConfigStore struct {
 	cfg      Config
 	version  uint64
 	onChange func()
+}
+
+// Exists reports whether a config file has been written.
+func (s *ConfigStore) Exists() bool {
+	_, err := os.Stat(s.path)
+	return err == nil
 }
 
 // LoadConfig reads path. A missing file gives the default (setup mode) config.
@@ -275,11 +295,19 @@ func (s *ConfigStore) Update(fn func(*Config) error) error {
 
 // Replace stores in as the new config. The token is write-only: an empty
 // token in `in` keeps the current one. Use ClearToken to remove it.
-func (s *ConfigStore) Replace(in Config) error {
+func (s *ConfigStore) Replace(in Config) error { return s.ReplaceIf(in, 0, false) }
+
+// ReplaceIf is Replace, but fails with ErrConfigConflict unless the current
+// version is version (0 skips the check). clearToken removes the stored
+// token when in has none.
+func (s *ConfigStore) ReplaceIf(in Config, version uint64, clearToken bool) error {
 	return s.Update(func(c *Config) error {
+		if version != 0 && version != s.version { // Update holds s.mu
+			return ErrConfigConflict
+		}
 		tok := c.HA.Token
 		*c = in.clone()
-		if c.HA.Token == "" {
+		if c.HA.Token == "" && !clearToken {
 			c.HA.Token = tok
 		}
 		return nil

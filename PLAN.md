@@ -24,7 +24,7 @@ A fullscreen, always-on **landscape** dashboard on a jailbroken Kindle Paperwhit
 | `GET /api/admin/eccc-sites` | ECCC site search |
 | `GET /healthz` | Health check |
 
-**Source layout:** `main.go`, `config.go` (atomic JSON store plus version counter), `i18n.go` (English and French strings), `ha.go`, `eccc.go` (`encoding/xml` structs), `render.go` (layout, drawing, rotation), `layout.go` (tile rectangles shared by drawing and tap matching), `handlers.go`, `web/settings.html`, `*_test.go`, `kindle/` (KUAL extension).
+**Source layout:** `main.go`, `config.go` (atomic JSON store plus version counter), `i18n.go` (English and French strings), `ha.go`, `eccc.go` (`encoding/xml` structs), `render.go` (layout, drawing, rotation), `layout.go` (tile rectangles shared by drawing and tap matching), `handlers.go`, `admin.go` (settings API), `sites.go` (ECCC site list), `web/settings.html`, `*_test.go`, `kindle/` (KUAL extension).
 
 **Dependencies:** standard library plus `golang.org/x/image` only. That package supplies `font/opentype`, the built-in Go fonts (`font/gofont`, BSD-licensed, so no font file to ship) and `draw` for scaling the ECCC icons. `CGO_ENABLED=0` still works.
 
@@ -61,7 +61,7 @@ A fullscreen, always-on **landscape** dashboard on a jailbroken Kindle Paperwhit
 - **Weather:** Province and city search, refresh interval.
 - **Display:** Rotation, left/right split, tile columns, flash interval, clock on/off.
 - **Live preview:** `<img src="/frame.png">`, reloaded whenever the version changes.
-- **Access:** Optional admin password.
+- **Access:** Optional admin password from `ADMIN_PASSWORD_FILE` (or `ADMIN_PASSWORD`), checked with HTTP Basic auth on `/settings` and `/api/admin/*`. It is set only in the environment, not on the page, so the page can't lock you out. The Kindle's routes (`/frame.png`, `/api/tap`, `/healthz`) stay open.
 
 ## 6. Docker
 - **Image:** Multi-stage build, with `golang:alpine` as the build stage (`CGO_ENABLED=0`). The runtime is `scratch` or distroless, with CA certificates (needed for HTTPS to ECCC). Import `time/tzdata` so `TZ` works. Run as non-root. Add a `-healthcheck` flag, since there's no `curl` in the image.

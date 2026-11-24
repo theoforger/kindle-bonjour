@@ -12,6 +12,9 @@ class H(BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(b)
     def do_GET(self):
         if self.headers.get("Authorization") != "Bearer test-token": return self._j({}, 401)
+        if self.path == "/api/": return self._j({"message": "API running."})
+        if self.path == "/api/states":
+            return self._j([{"entity_id": k, "state": v, "attributes": {"friendly_name": k}} for k, v in S.items()])
         eid = self.path.rsplit("/", 1)[-1]
         if eid in S: self._j({"entity_id": eid, "state": S[eid], "attributes": {"friendly_name": eid}})
         else: self._j({}, 404)

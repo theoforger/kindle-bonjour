@@ -20,6 +20,13 @@ type testEnv struct {
 	app   *App
 	srv   *httptest.Server
 	store *ConfigStore
+	sites *SiteList
+}
+
+// server builds the HTTP layer over the env's app, with an optional admin password.
+func (e *testEnv) server(password string) *Server {
+	return &Server{App: e.app, PollTimeout: 300 * time.Millisecond, Renderer: NewRenderer(testIcon),
+		Sites: e.sites, AdminPassword: password}
 }
 
 func newEnv(t *testing.T) *testEnv {
@@ -38,7 +45,9 @@ func newEnv(t *testing.T) *testEnv {
 	e.app = NewApp(store, newWeather(e.dd, e.clk), NewIconCache(filepath.Join(dir, "icons")))
 	e.app.Now = e.clk.Now
 	e.app.afterOp = time.Hour // tests refresh by hand
-	e.srv = httptest.NewServer((&Server{App: e.app, PollTimeout: 300 * time.Millisecond, Renderer: NewRenderer(testIcon)}).Handler())
+	e.sites = NewSiteList(filepath.Join(dir, "sites"))
+	e.sites.DD, e.sites.Now = e.dd.URL, e.clk.Now
+	e.srv = httptest.NewServer(e.server("").Handler())
 	t.Cleanup(e.srv.Close)
 	return e
 }

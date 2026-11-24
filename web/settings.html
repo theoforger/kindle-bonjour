@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kindle-bonjour</title>
+<style>
+  :root { --fg: #1b1b1b; --muted: #666; --line: #d4d4d4; --bg: #f4f4f2; --card: #fff; --accent: #1b1b1b; --bad: #b00020; --good: #1d6b35; }
+  * { box-sizing: border-box; }
+  body { font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); margin: 0; padding-bottom: 5rem; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding: .8rem 1rem; background: var(--card); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 1.15rem; margin: 0; flex: 1; }
+  #kindle { font-size: .85rem; color: var(--muted); width: 100%; }
+  main { max-width: 1100px; margin: 0 auto; padding: 1rem; display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 900px) { main { grid-template-columns: minmax(0, 1fr) 380px; } #preview-card { grid-column: 2; grid-row: 1 / span 5; align-self: start; position: sticky; top: 1rem; } }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; }
+  h2 { font-size: 1rem; margin: 0 0 .8rem; }
+  label { display: block; font-size: .9rem; margin: .6rem 0 .25rem; color: #333; }
+  input[type=text], input[type=url], input[type=password], input[type=search], input[type=number], select {
+    width: 100%; font: inherit; padding: .5rem .6rem; border: 1px solid #bbb; border-radius: 6px; background: #fff; }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid #5b8def; outline-offset: 1px; }
+  button { font: inherit; padding: .45rem .9rem; border: 1px solid var(--accent); border-radius: 6px; background: #fff; color: var(--accent); cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.small { padding: .2rem .5rem; font-size: .85rem; }
+  .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .hint { font-size: .85rem; color: var(--muted); margin: .3rem 0 0; }
+  .msg { font-size: .9rem; margin: .5rem 0 0; min-height: 1.2em; }
+  .msg.bad, .bad { color: var(--bad); }
+  .msg.good { color: var(--good); }
+  .seg { display: inline-flex; border: 1px solid var(--accent); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: .35rem .8rem; }
+  .seg button[aria-pressed=true] { background: var(--accent); color: #fff; }
+  ul.list { list-style: none; margin: .5rem 0 0; padding: 0; }
+  #ents li { display: flex; align-items: center; gap: .5rem; padding: .4rem; border: 1px solid var(--line); border-radius: 6px; margin-bottom: .35rem; background: #fff; }
+  #ents li.dragging { box-shadow: 0 2px 10px rgba(0,0,0,.25); border-color: #888; position: relative; z-index: 1; }
+  #ents .grip { cursor: grab; touch-action: none; user-select: none; padding: .3rem .4rem; color: #888; font-size: 1.2rem; line-height: 1; }
+  #ents .main { flex: 1; min-width: 0; }
+  #ents .main input { padding: .3rem .5rem; }
+  #ents .id { font-size: .8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #ents li.missing .id::after { content: " ⚠"; color: var(--bad); }
+  .picker { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; margin-top: .4rem; }
+  .picker li { display: flex; justify-content: space-between; gap: .5rem; padding: .45rem .6rem; border-bottom: 1px solid #eee; cursor: pointer; }
+  .picker li:hover, .picker li:focus { background: #f0f0f0; outline: none; }
+  .picker li .sub { font-size: .8rem; color: var(--muted); white-space: nowrap; }
+  .picker li.empty { cursor: default; color: var(--muted); }
+  .radios label { display: flex; gap: .5rem; align-items: center; margin: .3rem 0; font-size: .95rem; color: var(--fg); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 1rem; }
+  .check { display: flex; gap: .5rem; align-items: center; }
+  #preview { width: 100%; height: auto; display: block; border: 1px solid #999; background: #fff; }
+  #savebar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: .6rem 1rem; display: flex; gap: 1rem; align-items: center; justify-content: flex-end; }
+  #savebar .msg { margin: 0; flex: 1; text-align: right; }
+  #banner { display: none; background: #fff6d6; border: 1px solid #e6c84f; border-radius: 8px; padding: .7rem 1rem; }
+  #banner.show { display: block; }
+</style>
+</head>
+<body>
+<header>
+  <h1 data-t="title">Dashboard settings</h1>
+  <div class="seg" role="group" aria-label="Language">
+    <button type="button" id="lang-en" lang="en">English</button>
+    <button type="button" id="lang-fr" lang="fr">Français</button>
+  </div>
+  <div id="kindle">…</div>
+</header>
+
+<main>
+  <div id="banner" data-t="setup_banner">Setup: connect Home Assistant, then pick switches and a weather location.</div>
+
+  <section id="ha">
+    <h2 data-t="ha_title">Home Assistant</h2>
+    <label for="ha-url" data-t="ha_url">Address</label>
+    <input type="url" id="ha-url" placeholder="http://192.168.1.10:8123" autocomplete="off" spellcheck="false">
+    <p class="hint" data-t="ha_url_hint">Use the IP address, not homeassistant.local.</p>
+    <label for="ha-token" data-t="ha_token">Long-lived access token</label>
+    <input type="password" id="ha-token" autocomplete="new-password" spellcheck="false">
+    <p class="hint" id="token-hint"></p>
+    <div class="row" style="margin-top:.6rem">
+      <button type="button" id="ha-test" data-t="ha_test">Test connection</button>
+      <label class="check" style="margin:0" id="clear-wrap"><input type="checkbox" id="ha-clear"> <span data-t="ha_clear">Remove saved token</span></label>
+    </div>
+    <p class="msg" id="ha-msg" aria-live="polite"></p>
+  </section>
+
+  <section id="switches">
+    <h2 data-t="sw_title">Switches</h2>
+    <ul class="list" id="ents"></ul>
+    <p class="hint" id="ents-empty" data-t="sw_none">No switches yet. Add some below.</p>
+    <label for="ent-search" data-t="sw_add">Add a switch</label>
+    <input type="search" id="ent-search" autocomplete="off">
+    <ul class="list picker" id="ent-results"></ul>
+    <p class="msg" id="ent-msg" aria-live="polite"></p>
+  </section>
+
+  <section id="weather">
+    <h2 data-t="wx_title">Weather</h2>
+    <p id="wx-current"></p>
+    <label for="wx-search" data-t="wx_search">Find a city</label>
+    <input type="search" id="wx-search" autocomplete="off">
+    <ul class="list picker" id="wx-results"></ul>
+    <p class="msg" id="wx-msg" aria-live="polite"></p>
+    <label for="wx-refresh" data-t="wx_refresh">Refresh every</label>
+    <select id="wx-refresh"></select>
+  </section>
+
+  <section id="display">
+    <h2 data-t="ds_title">Display</h2>
+    <label data-t="ds_rotation">How the Kindle is held</label>
+    <div class="radios" id="rotation"></div>
+    <div class="grid2">
+      <div>
+        <label for="ds-split"><span data-t="ds_split">Switches' share of the screen</span>: <b id="ds-split-val"></b></label>
+        <input type="range" id="ds-split" min="30" max="80" step="1" style="width:100%">
+      </div>
+      <div>
+        <label for="ds-cols" data-t="ds_columns">Tile columns</label>
+        <select id="ds-cols"><option>1</option><option>2</option><option>3</option><option>4</option></select>
+      </div>
+      <div>
+        <label for="ds-flash" data-t="ds_flash">Full refresh every (minutes)</label>
+        <input type="number" id="ds-flash" min="0" max="1440" step="1" inputmode="numeric">
+        <p class="hint" data-t="ds_flash_hint">Clears ghosting with a flash. 0 = never.</p>
+      </div>
+      <div>
+        <label data-t="ds_clock_label">Clock</label>
+        <label class="check"><input type="checkbox" id="ds-clock"> <span data-t="ds_clock">Show the time and date</span></label>
+      </div>
+    </div>
+  </section>
+
+  <section id="preview-card">
+    <h2 data-t="pv_title">Live preview</h2>
+    <canvas id="preview" width="1448" height="1072" aria-label="preview"></canvas>
+    <p class="hint" id="pv-msg" data-t="pv_hint">This is what the Kindle shows. It updates after you save.</p>
+    <p class="hint"><a href="/" data-t="pv_debug">Open the debug view</a></p>
+  </section>
+</main>
+
+<div id="savebar">
+  <p class="msg" id="save-msg" aria-live="polite"></p>
+  <button type="button" id="reload" hidden data-t="reload">Reload</button>
+  <button type="button" class="primary" id="save" data-t="save">Save</button>
+</div>
+
+<script>
+'use strict';
+const STR = {
+  en: {
+    title: 'Dashboard settings',
+    setup_banner: 'Setup: connect Home Assistant, then pick switches and a weather location.',
+    ha_title: 'Home Assistant', ha_url: 'Address', ha_url_hint: 'Use the IP address, not homeassistant.local.',
+    ha_token: 'Long-lived access token', ha_token_saved: 'A token is saved. Leave this empty to keep it.',
+    ha_token_none: 'Create one in Home Assistant under your profile → Security.',
+    ha_test: 'Test connection', ha_clear: 'Remove saved token', ha_testing: 'Testing…',
+    ha_ok: 'Connected. {n} entities can be added.',
+    sw_title: 'Switches', sw_none: 'No switches yet. Add some below.', sw_add: 'Add a switch',
+    sw_search: 'Search by name or entity ID', sw_loading: 'Loading entities…', sw_nomatch: 'No matching entities.',
+    sw_save_ha: 'Save the Home Assistant connection first.', sw_name: 'Name on the tile',
+    sw_up: 'Move up', sw_down: 'Move down', sw_remove: 'Remove', sw_drag: 'Drag to reorder',
+    sw_missing: 'Not found in Home Assistant',
+    wx_title: 'Weather', wx_search: 'Find a city', wx_search_ph: 'e.g. Toronto, Montréal', wx_none: 'No location set.',
+    wx_current: 'Location: {name}, {prov}', wx_searching: 'Searching…', wx_nomatch: 'No matching city.',
+    wx_refresh: 'Refresh every', wx_min: '{n} minutes', wx_hour: '1 hour',
+    ds_title: 'Display', ds_rotation: 'How the Kindle is held', ds_split: "Switches' share of the screen",
+    ds_columns: 'Tile columns', ds_flash: 'Full refresh every (minutes)', ds_flash_hint: 'Clears ghosting with a flash. 0 = never.',
+    ds_clock_label: 'Clock', ds_clock: 'Show the time and date',
+    rot_0: 'Landscape, USB port on the right (default)', rot_90: 'Portrait, USB port at the bottom',
+    rot_180: 'Landscape, USB port on the left', rot_270: 'Portrait, USB port at the top',
+    pv_title: 'Live preview', pv_hint: 'This is what the Kindle shows. It updates after you save.',
+    pv_offline: 'Preview offline, retrying…', pv_debug: 'Open the debug view',
+    save: 'Save', saving: 'Saving…', saved: 'Saved. The Kindle updates within a few seconds.',
+    unsaved: 'Unsaved changes', reload: 'Reload',
+    kindle_never: 'Kindle: not seen yet', kindle_seen: 'Kindle last seen {age} ago ({addr})',
+    kindle_late: 'Kindle last seen {age} ago ({addr}): it should poll every 25 s',
+    status_ha: 'Home Assistant: {err}', status_wx_stale: 'Weather data is old.',
+    secs: '{n} s', mins: '{n} min', hours: '{n} h',
+    leave: 'You have unsaved changes.',
+    // Admin API error keys.
+    err_unauthorized: 'Wrong password. Reload the page to sign in again.',
+    err_forbidden: 'Request blocked (cross-site).', err_bad_request: 'The server did not understand the request.',
+    err_config_conflict: 'The settings were changed somewhere else. Reload to see them (your edits here will be lost).',
+    err_save_failed: 'The server could not write its config file.',
+    err_invalid_url: 'The address must start with http:// or https://.',
+    err_invalid_entity: 'Invalid entity ID: {arg}', err_duplicate_entity: '{arg} is on the list twice.',
+    err_invalid_language: 'Unknown language.', err_invalid_refresh: 'The weather refresh must be at least 1 minute.',
+    err_invalid_rotation: 'Invalid rotation.', err_invalid_split: 'The split must be between 30 and 80 %.',
+    err_invalid_columns: 'Columns must be between 1 and 4.', err_invalid_flash: 'The refresh interval cannot be negative.',
+    err_ha_not_configured: 'Enter the Home Assistant address and token.',
+    err_ha_token_rejected: 'Home Assistant rejected the token.',
+    err_ha_unreachable: 'Cannot reach Home Assistant ({arg}).',
+    err_sites_unavailable: 'Cannot load the Environment Canada city list ({arg}).',
+    err_network: 'Cannot reach the dashboard server.', err_unknown: 'Error: {arg}',
+  },
+  fr: {
+    title: 'Réglages du tableau de bord',
+    setup_banner: 'Configuration : connectez Home Assistant, puis choisissez les interrupteurs et la ville pour la météo.',
+    ha_title: 'Home Assistant', ha_url: 'Adresse', ha_url_hint: 'Utilisez l’adresse IP, pas homeassistant.local.',
+    ha_token: 'Jeton d’accès longue durée', ha_token_saved: 'Un jeton est enregistré. Laissez vide pour le garder.',
+    ha_token_none: 'Créez-en un dans Home Assistant, sous votre profil → Sécurité.',
+    ha_test: 'Tester la connexion', ha_clear: 'Supprimer le jeton enregistré', ha_testing: 'Test en cours…',
+    ha_ok: 'Connecté. {n} entités peuvent être ajoutées.',
+    sw_title: 'Interrupteurs', sw_none: 'Aucun interrupteur. Ajoutez-en ci-dessous.', sw_add: 'Ajouter un interrupteur',
+    sw_search: 'Chercher par nom ou identifiant', sw_loading: 'Chargement des entités…', sw_nomatch: 'Aucune entité correspondante.',
+    sw_save_ha: 'Enregistrez d’abord la connexion à Home Assistant.', sw_name: 'Nom sur la tuile',
+    sw_up: 'Monter', sw_down: 'Descendre', sw_remove: 'Retirer', sw_drag: 'Glisser pour réordonner',
+    sw_missing: 'Introuvable dans Home Assistant',
+    wx_title: 'Météo', wx_search: 'Trouver une ville', wx_search_ph: 'p. ex. Toronto, Montréal', wx_none: 'Aucune ville choisie.',
+    wx_current: 'Ville : {name}, {prov}', wx_searching: 'Recherche…', wx_nomatch: 'Aucune ville correspondante.',
+    wx_refresh: 'Actualiser toutes les', wx_min: '{n} minutes', wx_hour: '1 heure',
+    ds_title: 'Affichage', ds_rotation: 'Orientation de la Kindle', ds_split: 'Part de l’écran pour les interrupteurs',
+    ds_columns: 'Colonnes de tuiles', ds_flash: 'Rafraîchissement complet toutes les (minutes)',
+    ds_flash_hint: 'Efface les images rémanentes par un flash. 0 = jamais.',
+    ds_clock_label: 'Horloge', ds_clock: 'Afficher l’heure et la date',
+    rot_0: 'Paysage, port USB à droite (par défaut)', rot_90: 'Portrait, port USB en bas',
+    rot_180: 'Paysage, port USB à gauche', rot_270: 'Portrait, port USB en haut',
+    pv_title: 'Aperçu en direct', pv_hint: 'Voici ce qu’affiche la Kindle. L’aperçu change après l’enregistrement.',
+    pv_offline: 'Aperçu hors ligne, nouvel essai…', pv_debug: 'Ouvrir la vue de débogage',
+    save: 'Enregistrer', saving: 'Enregistrement…', saved: 'Enregistré. La Kindle se met à jour en quelques secondes.',
+    unsaved: 'Modifications non enregistrées', reload: 'Recharger',
+    kindle_never: 'Kindle : pas encore vue', kindle_seen: 'Kindle vue il y a {age} ({addr})',
+    kindle_late: 'Kindle vue il y a {age} ({addr}) : elle devrait interroger toutes les 25 s',
+    status_ha: 'Home Assistant : {err}', status_wx_stale: 'Les données météo sont anciennes.',
+    secs: '{n} s', mins: '{n} min', hours: '{n} h',
+    leave: 'Des modifications ne sont pas enregistrées.',
+    err_unauthorized: 'Mot de passe incorrect. Rechargez la page pour vous reconnecter.',
+    err_forbidden: 'Requête bloquée (autre site).', err_bad_request: 'Le serveur n’a pas compris la requête.',
+    err_config_conflict: 'Les réglages ont été modifiés ailleurs. Rechargez pour les voir (vos modifications ici seront perdues).',
+    err_save_failed: 'Le serveur n’a pas pu écrire son fichier de configuration.',
+    err_invalid_url: 'L’adresse doit commencer par http:// ou https://.',
+    err_invalid_entity: 'Identifiant d’entité invalide : {arg}', err_duplicate_entity: '{arg} est deux fois dans la liste.',
+    err_invalid_language: 'Langue inconnue.', err_invalid_refresh: 'L’actualisation météo doit être d’au moins 1 minute.',
+    err_invalid_rotation: 'Orientation invalide.', err_invalid_split: 'La part doit être entre 30 et 80 %.',
+    err_invalid_columns: 'Il faut entre 1 et 4 colonnes.', err_invalid_flash: 'L’intervalle ne peut pas être négatif.',
+    err_ha_not_configured: 'Entrez l’adresse et le jeton de Home Assistant.',
+    err_ha_token_rejected: 'Home Assistant a refusé le jeton.',
+    err_ha_unreachable: 'Home Assistant est injoignable ({arg}).',
+    err_sites_unavailable: 'Impossible de charger la liste des villes d’Environnement Canada ({arg}).',
+    err_network: 'Le serveur du tableau de bord est injoignable.', err_unknown: 'Erreur : {arg}',
+  },
+};
+
+const $ = id => document.getElementById(id);
+let lang = 'en';
+let cfg = null;          // the config being edited (server shape)
+let tokenSet = false;
+let dirty = false;
+let haEntities = null;   // [{id, name, state, domain}] from HA, or null before loading
+let siteName = null;     // {name, province} of cfg.eccc.site
+
+function t(key, vars = {}) {
+  let s = (STR[lang] && STR[lang][key]) ?? STR.en[key] ?? key;
+  return s.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
+}
+function errText(body) {
+  const key = body && body.error;
+  if (key && STR.en['err_' + key]) return t('err_' + key, { arg: body.arg || '' });
+  return t('err_unknown', { arg: key || '?' });
+}
+function msg(el, text, kind = '') { el.textContent = text; el.className = 'msg' + (kind ? ' ' + kind : ''); }
+
+async function api(method, path, body) {
+  let r;
+  try {
+    r = await fetch(path, {
+      method, cache: 'no-store',
+      headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (e) {
+    return { ok: false, status: 0, body: { error: 'network' } };
+  }
+  let j = {};
+  try { j = await r.json(); } catch (e) { /* empty or not JSON */ }
+  return { ok: r.ok, status: r.status, body: j };
+}
+
+// ---- language ----
+function applyLanguage() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-t]').forEach(el => { el.textContent = t(el.dataset.t); });
+  $('lang-en').setAttribute('aria-pressed', lang === 'en');
+  $('lang-fr').setAttribute('aria-pressed', lang === 'fr');
+  $('ent-search').placeholder = t('sw_search');
+  $('wx-search').placeholder = t('wx_search_ph');
+  document.title = t('title');
+  if (cfg) { renderAll(); }
+  refreshStatus();
+}
+
+// Switching language saves it at once (the frame, the ECCC feed and this
+// page all follow). It saves only the language, on top of the saved config,
+// so other unsaved edits on the page stay unsaved.
+async function setLanguage(l) {
+  if (l === lang) return;
+  const prev = lang;
+  lang = l;
+  applyLanguage();
+  const cur = await api('GET', '/api/admin/config');
+  if (!cur.ok) { lang = prev; applyLanguage(); msg($('save-msg'), errText(cur.body), 'bad'); return; }
+  const saved = cur.body;
+  const wasCurrent = saved.version === cfg.version;
+  const r = await api('PUT', '/api/admin/config', { ...toServer(saved), language: l, version: saved.version });
+  if (!r.ok) { lang = prev; applyLanguage(); msg($('save-msg'), errText(r.body), 'bad'); return; }
+  cfg.language = l;
+  if (wasCurrent) cfg.version = r.body.version;
+  if (siteName && cfg.eccc.site) loadSiteName();
+  if (!dirty) msg($('save-msg'), t('saved'), 'good');
+}
+$('lang-en').onclick = () => setLanguage('en');
+$('lang-fr').onclick = () => setLanguage('fr');
+
+// ---- load / save ----
+function toServer(c) {
+  return {
+    language: c.language,
+    home_assistant: { url: c.home_assistant.url, token: '' },
+    entities: c.entities.map(e => ({ id: e.id, name: e.name || '' })),
+    eccc: c.eccc, display: c.display, version: c.version,
+  };
+}
+
+async function load() {
+  const r = await api('GET', '/api/admin/config');
+  if (!r.ok) { msg($('save-msg'), errText(r.body), 'bad'); return; }
+  cfg = r.body;
+  lang = cfg.language === 'fr' ? 'fr' : 'en';
+  tokenSet = cfg.home_assistant.token_set;
+  $('banner').classList.toggle('show', !!cfg.setup);
+  $('ha-url').value = cfg.home_assistant.url || '';
+  $('ha-token').value = '';
+  $('ha-clear').checked = false;
+  setDirty(false);
+  $('reload').hidden = true;
+  applyLanguage();
+  if (cfg.eccc.site) loadSiteName(); else siteName = null;
+  haEntities = null;
+  if (!cfg.setup) loadEntities();
+}
+
+async function save() {
+  const body = toServer(cfg);
+  body.home_assistant.url = $('ha-url').value.trim();
+  body.home_assistant.token = $('ha-token').value.trim();
+  body.home_assistant.clear_token = $('ha-clear').checked && !body.home_assistant.token;
+  $('save').disabled = true;
+  msg($('save-msg'), t('saving'));
+  const r = await api('PUT', '/api/admin/config', body);
+  $('save').disabled = false;
+  if (!r.ok) {
+    msg($('save-msg'), errText(r.body), 'bad');
+    $('reload').hidden = r.body.error !== 'config_conflict';
+    return;
+  }
+  const haChanged = body.home_assistant.token || body.home_assistant.url !== cfg.home_assistant.url || body.home_assistant.clear_token;
+  cfg = r.body;
+  tokenSet = cfg.home_assistant.token_set;
+  $('ha-token').value = '';
+  $('ha-clear').checked = false;
+  $('banner').classList.toggle('show', !!cfg.setup);
+  setDirty(false);
+  renderAll();
+  msg($('save-msg'), t('saved'), 'good');
+  if (haChanged || haEntities === null) { haEntities = null; if (!cfg.setup) loadEntities(); }
+}
+$('save').onclick = save;
+$('reload').onclick = load;
+
+function setDirty(d) {
+  dirty = d;
+  if (d) msg($('save-msg'), t('unsaved'));
+}
+window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = t('leave'); } });
+
+function renderAll() {
+  $('token-hint').textContent = tokenSet ? t('ha_token_saved') : t('ha_token_none');
+  $('clear-wrap').hidden = !tokenSet;
+  renderEntities();
+  renderPicker();
+  renderWeather();
+  renderDisplay();
+}
+
+// ---- Home Assistant ----
+$('ha-url').addEventListener('input', () => setDirty(true));
+$('ha-token').addEventListener('input', () => setDirty(true));
+$('ha-clear').addEventListener('change', () => setDirty(true));
+$('ha-test').onclick = async () => {
+  const m = $('ha-msg');
+  msg(m, t('ha_testing'));
+  $('ha-test').disabled = true;
+  const r = await api('POST', '/api/admin/test-ha', { url: $('ha-url').value.trim(), token: $('ha-token').value.trim() });
+  $('ha-test').disabled = false;
+  if (r.ok) msg(m, t('ha_ok', { n: r.body.entities }), 'good');
+  else msg(m, errText(r.body), 'bad');
+};
+
+// ---- switches ----
+async function loadEntities() {
+  msg($('ent-msg'), t('sw_loading'));
+  const r = await api('GET', '/api/admin/entities');
+  if (!r.ok) {
+    haEntities = null;
+    msg($('ent-msg'), r.body.error === 'ha_not_configured' ? t('sw_save_ha') : errText(r.body), 'bad');
+    return;
+  }
+  haEntities = r.body.entities;
+  msg($('ent-msg'), '');
+  renderEntities();
+  renderPicker();
+}
+
+function haName(id) {
+  const e = haEntities && haEntities.find(x => x.id === id);
+  return e ? e.name : '';
+}
+
+function el(tag, props = {}, ...kids) {
+  const n = document.createElement(tag);
+  Object.assign(n, props);
+  for (const k of kids) n.append(k);
+  return n;
+}
+
+function renderEntities() {
+  const ul = $('ents');
+  ul.replaceChildren();
+  $('ents-empty').hidden = cfg.entities.length > 0;
+  cfg.entities.forEach((e, i) => {
+    const name = el('input', { type: 'text', value: e.name || '', placeholder: haName(e.id) || e.id });
+    name.setAttribute('aria-label', t('sw_name') + ' ' + e.id);
+    name.addEventListener('input', () => { e.name = name.value; setDirty(true); });
+    const grip = el('span', { className: 'grip', textContent: '⠿', title: t('sw_drag') });
+    grip.setAttribute('aria-hidden', 'true');
+    const li = el('li', {},
+      grip,
+      el('div', { className: 'main' }, name, el('div', { className: 'id', textContent: e.id })),
+      el('button', { type: 'button', className: 'small', textContent: '↑', title: t('sw_up'), disabled: i === 0, onclick: () => move(i, -1) }),
+      el('button', { type: 'button', className: 'small', textContent: '↓', title: t('sw_down'), disabled: i === cfg.entities.length - 1, onclick: () => move(i, 1) }),
+      el('button', { type: 'button', className: 'small', textContent: '✕', title: t('sw_remove'), onclick: () => { cfg.entities.splice(i, 1); setDirty(true); renderEntities(); renderPicker(); } }),
+    );
+    if (haEntities && !haEntities.some(x => x.id === e.id)) { li.classList.add('missing'); li.title = t('sw_missing'); }
+    li.dataset.id = e.id;
+    ul.append(li);
+    dragHandle(grip, li);
+  });
+}
+
+function move(i, d) {
+  const j = i + d;
+  if (j < 0 || j >= cfg.entities.length) return;
+  [cfg.entities[i], cfg.entities[j]] = [cfg.entities[j], cfg.entities[i]];
+  setDirty(true);
+  renderEntities();
+}
+
+// Pointer-event drag (works with touch, unlike HTML5 drag and drop). The
+// row moves in the DOM while dragging; the order is read back on release.
+function dragHandle(grip, li) {
+  grip.addEventListener('pointerdown', ev => {
+    ev.preventDefault();
+    grip.setPointerCapture(ev.pointerId);
+    li.classList.add('dragging');
+    const ul = $('ents');
+    const onMove = e => {
+      const prev = li.previousElementSibling, next = li.nextElementSibling;
+      if (prev) { const r = prev.getBoundingClientRect(); if (e.clientY < r.top + r.height / 2) { ul.insertBefore(li, prev); return; } }
+      if (next) { const r = next.getBoundingClientRect(); if (e.clientY > r.top + r.height / 2) { ul.insertBefore(next, li); } }
+    };
+    const onUp = () => {
+      grip.removeEventListener('pointermove', onMove);
+      grip.removeEventListener('pointerup', onUp);
+      grip.removeEventListener('pointercancel', onUp);
+      li.classList.remove('dragging');
+      const order = [...ul.children].map(n => n.dataset.id);
+      const before = cfg.entities.map(e => e.id).join();
+      cfg.entities.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      if (cfg.entities.map(e => e.id).join() !== before) setDirty(true);
+      renderEntities();
+    };
+    grip.addEventListener('pointermove', onMove);
+    grip.addEventListener('pointerup', onUp);
+    grip.addEventListener('pointercancel', onUp);
+  });
+}
+
+function renderPicker() {
+  const ul = $('ent-results');
+  ul.replaceChildren();
+  if (!haEntities) { ul.hidden = true; return; }
+  ul.hidden = false;
+  const q = $('ent-search').value.trim().toLowerCase();
+  const have = new Set(cfg.entities.map(e => e.id));
+  const list = haEntities.filter(e => !have.has(e.id) &&
+    (!q || e.id.toLowerCase().includes(q) || e.name.toLowerCase().includes(q))).slice(0, 100);
+  if (!list.length) { ul.append(el('li', { className: 'empty', textContent: t('sw_nomatch') })); return; }
+  for (const e of list) {
+    const li = el('li', { tabIndex: 0 }, el('span', { textContent: e.name }), el('span', { className: 'sub', textContent: e.id }));
+    const add = () => { cfg.entities.push({ id: e.id, name: '' }); setDirty(true); renderEntities(); renderPicker(); };
+    li.onclick = add;
+    li.onkeydown = k => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); add(); } };
+    ul.append(li);
+  }
+}
+$('ent-search').addEventListener('input', renderPicker);
+
+// ---- weather ----
+const REFRESH = [300, 600, 900, 1800, 3600];
+async function loadSiteName() {
+  const code = cfg.eccc.site;
+  const r = await api('GET', `/api/admin/eccc-sites?lang=${lang}&code=${encodeURIComponent(code)}`);
+  if (cfg.eccc.site !== code) return;
+  siteName = r.ok && r.body.sites.length ? { name: r.body.sites[0].name, province: r.body.sites[0].province } : { name: code, province: cfg.eccc.province };
+  renderWeather();
+}
+function renderWeather() {
+  $('wx-current').textContent = cfg.eccc.site
+    ? t('wx_current', { name: siteName ? siteName.name : cfg.eccc.site, prov: cfg.eccc.province })
+    : t('wx_none');
+  const sel = $('wx-refresh');
+  const cur = cfg.eccc.refresh_seconds || 600;
+  const opts = REFRESH.includes(cur) ? REFRESH : [...REFRESH, cur].sort((a, b) => a - b);
+  sel.replaceChildren(...opts.map(s => el('option', { value: s, textContent: s === 3600 ? t('wx_hour') : t('wx_min', { n: Math.round(s / 60) }), selected: s === cur })));
+}
+$('wx-refresh').addEventListener('change', e => { cfg.eccc.refresh_seconds = +e.target.value; setDirty(true); });
+
+let wxTimer = 0, wxSeq = 0;
+$('wx-search').addEventListener('input', () => {
+  clearTimeout(wxTimer);
+  wxTimer = setTimeout(searchSites, 250);
+});
+async function searchSites() {
+  const q = $('wx-search').value.trim();
+  const ul = $('wx-results');
+  const seq = ++wxSeq;
+  if (q.length < 2) { ul.replaceChildren(); msg($('wx-msg'), ''); return; }
+  msg($('wx-msg'), t('wx_searching'));
+  const r = await api('GET', `/api/admin/eccc-sites?lang=${lang}&q=${encodeURIComponent(q)}`);
+  if (seq !== wxSeq) return;
+  if (!r.ok) { msg($('wx-msg'), errText(r.body), 'bad'); ul.replaceChildren(); return; }
+  msg($('wx-msg'), r.body.sites.length ? '' : t('wx_nomatch'));
+  ul.replaceChildren(...r.body.sites.map(s => {
+    const li = el('li', { tabIndex: 0 }, el('span', { textContent: s.name }), el('span', { className: 'sub', textContent: `${s.province} · ${s.code}` }));
+    const pick = () => {
+      cfg.eccc.site = s.code; cfg.eccc.province = s.province; siteName = { name: s.name, province: s.province };
+      setDirty(true); renderWeather(); ul.replaceChildren(); $('wx-search').value = '';
+    };
+    li.onclick = pick;
+    li.onkeydown = k => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); pick(); } };
+    return li;
+  }));
+}
+
+// ---- display ----
+function renderDisplay() {
+  const d = cfg.display;
+  $('rotation').replaceChildren(...[0, 90, 180, 270].map(r => {
+    const input = el('input', { type: 'radio', name: 'rotation', value: r, checked: d.rotation === r });
+    input.onchange = () => { d.rotation = r; setDirty(true); };
+    return el('label', {}, input, el('span', { textContent: t('rot_' + r) }));
+  }));
+  $('ds-split').value = Math.round(d.split * 100);
+  $('ds-split-val').textContent = Math.round(d.split * 100) + ' %';
+  $('ds-cols').value = d.columns;
+  $('ds-flash').value = d.flash_minutes;
+  $('ds-clock').checked = d.clock;
+}
+$('ds-split').addEventListener('input', e => { cfg.display.split = e.target.value / 100; $('ds-split-val').textContent = e.target.value + ' %'; setDirty(true); });
+$('ds-cols').addEventListener('change', e => { cfg.display.columns = +e.target.value; setDirty(true); });
+$('ds-flash').addEventListener('input', e => {
+  const n = parseInt(e.target.value, 10);
+  cfg.display.flash_minutes = Number.isFinite(n) ? n : 0;
+  setDirty(true);
+});
+$('ds-clock').addEventListener('change', e => { cfg.display.clock = e.target.checked; setDirty(true); });
+
+// ---- live preview ----
+// /frame.png is the panel image (portrait, already rotated for the Kindle).
+// Turn it back the way the Kindle is held so it reads upright here.
+async function previewLoop() {
+  const canvas = $('preview'), ctx = canvas.getContext('2d');
+  let version = 0;
+  for (;;) {
+    try {
+      const r = await fetch(`/frame.png?debug=1&v=${version}`, { cache: 'no-store' });
+      if (r.status === 200) {
+        version = r.headers.get('X-Version');
+        const rot = +(r.headers.get('X-Rotation') || 0);
+        const bmp = await createImageBitmap(await r.blob());
+        const turn = { 0: -90, 90: 0, 180: 90, 270: 180 }[rot] ?? 0;
+        const side = turn % 180 !== 0;
+        canvas.width = side ? bmp.height : bmp.width;
+        canvas.height = side ? bmp.width : bmp.height;
+        ctx.save();
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate(turn * Math.PI / 180);
+        ctx.drawImage(bmp, -bmp.width / 2, -bmp.height / 2);
+        ctx.restore();
+        $('pv-msg').textContent = t('pv_hint');
+      } else if (r.status !== 204) {
+        throw new Error(r.status);
+      }
+    } catch (e) {
+      $('pv-msg').textContent = t('pv_offline');
+      await new Promise(ok => setTimeout(ok, 3000));
+    }
+  }
+}
+
+// ---- Kindle and server status ----
+function age(s) {
+  if (s < 90) return t('secs', { n: s });
+  if (s < 5400) return t('mins', { n: Math.round(s / 60) });
+  return t('hours', { n: Math.round(s / 3600) });
+}
+let lastHealth = null;
+async function refreshStatus(fetchNew = false) {
+  if (fetchNew || !lastHealth) {
+    try { lastHealth = await (await fetch('/healthz', { cache: 'no-store' })).json(); } catch (e) { lastHealth = null; }
+  }
+  const h = lastHealth;
+  if (!h) { $('kindle').textContent = t('err_network'); return; }
+  const k = h.kindle || {};
+  const parts = [k.last_seen == null ? t('kindle_never')
+    : t(k.age_seconds > 60 ? 'kindle_late' : 'kindle_seen', { age: age(k.age_seconds), addr: k.addr })];
+  if (h.home_assistant && h.home_assistant.error && !h.setup) parts.push(t('status_ha', { err: h.home_assistant.error }));
+  if (h.weather && h.weather.stale) parts.push(t('status_wx_stale'));
+  $('kindle').textContent = parts.join(' · ');
+}
+setInterval(() => refreshStatus(true), 10000);
+
+load().then(() => refreshStatus(true));
+previewLoop();
+</script>
+</body>
+</html>

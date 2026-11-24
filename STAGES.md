@@ -117,11 +117,27 @@ Kindle (`kindle/ha-dash/`):
 
 **Goal:** Configure everything without a restart.
 
-- [ ] `/api/admin/config`, `entities`, `test-ha` and `eccc-sites`, plus an optional admin password.
-- [ ] `web/settings.html` sections: HA connection, entity picker (search, rename, drag to reorder, remove), weather location, display options (rotation, split, columns, flash interval, clock), live preview using `/frame.png`.
-- [ ] **Language toggle (English / Français)** in the settings page. It saves `language`, and the frame, the weather feed and the settings page all switch. The settings page has its own en/fr string table and starts from the saved language. Admin API errors return a message key the page translates.
-- [ ] ECCC site search shows city names in the chosen language (`siteList.xml` has both `nameEn` and `nameFr`).
-- [ ] Setup mode when there's no config, with a "configure me" frame, and seeding from `HA_URL`, `HA_TOKEN` and `PORT`.
+- [x] `/api/admin/config`, `entities`, `test-ha` and `eccc-sites`, plus an optional admin password.
+- [x] `web/settings.html` sections: HA connection, entity picker (search, rename, drag to reorder, remove), weather location, display options (rotation, split, columns, flash interval, clock), live preview using `/frame.png`.
+- [x] **Language toggle (English / Français)** in the settings page. It saves `language`, and the frame, the weather feed and the settings page all switch. The settings page has its own en/fr string table and starts from the saved language. Admin API errors return a message key the page translates.
+- [x] ECCC site search shows city names in the chosen language. (There is no `siteList.xml` any more; see the notes.)
+- [x] Setup mode when there's no config, with a "configure me" frame, and seeding from `HA_URL`, `HA_TOKEN` and `PORT`.
+- [ ] **Tried in a real browser** (phone and desktop). Nothing has run the page's JavaScript yet; see the notes.
+
+**Notes (2026-11-23):**
+- **Code:** `admin.go` (handlers, password, same-origin check), `sites.go` (ECCC site list), `web/settings.html` (embedded). `config.go` validation errors are now `ValidationError{Key, Arg}`; the key goes to the page.
+- **`PUT /api/admin/config`** takes the whole config plus the `version` from `GET`. A different version gives `409 config_conflict`, so two open pages can't overwrite each other without warning. An empty token keeps the saved one, and `clear_token: true` removes it. Errors are `{"ok": false, "error": "<key>", "arg": "..."}`. A test checks that every key in `config.go` has an `err_<key>` in both of the page's languages.
+- **Language toggle** saves straight away, but only the language: the page reads the saved config, changes `language` and puts it back, so other unsaved edits on the page stay unsaved.
+- **`POST /api/admin/test-ha {url, token}`** checks a connection without saving it. Empty fields use the saved values. **`GET /api/admin/entities`** uses the *saved* connection, so the picker appears after the HA connection is saved.
+- **ECCC site list:** the old `siteList.xml` is gone (404). The datamart now has `today/citypage_weather/docs/site_list_en.csv` and `site_list_fr.csv` (UTF-8, two header lines, 855 sites, with `HEF` for highway sites). The server merges them by code, keeps them for a day, and saves a copy in `/data` for when the network is down. Search ignores case and accents, matches either language's name, and puts names that start with the query first. `?code=` looks up one site so the page can show the saved one by name. Fixtures: `testdata/eccc/site_list_{en,fr}.csv` (cut down from the real files).
+- **Admin password:** `ADMIN_PASSWORD_FILE` (for a Docker secret), else `ADMIN_PASSWORD`. HTTP Basic auth, any user name. It is set only in the environment, so the page can't lock you out. Without one the server logs a warning at start. The Kindle's routes stay open.
+- **Cross-site writes:** admin writes must be `Content-Type: application/json` (a plain HTML form can't send that without a CORS preflight, which is never answered), and the `Origin`, if sent, must match the host. `Sec-Fetch-Site: cross-site` is refused too.
+- **Setup mode:** `GET /` redirects to `/settings`. `HA_URL`/`HA_TOKEN` write a first `config.json` only when there is none, so after that the settings page is in charge. A bad `HA_URL` stops the server at start instead of saving a broken config.
+- **Live preview:** the page long-polls `/frame.png?debug=1` (so it doesn't count as the Kindle or use up the flash) and draws it on a canvas turned the way the Kindle is held, using a new `X-Rotation` header. The header also shows "Kindle last seen", the HA error and stale weather from `/healthz`, refreshed every 10 s.
+- **Reordering** uses pointer events (they work with touch; HTML5 drag and drop doesn't on phones), plus ↑/↓ buttons.
+- **`testdata/mock_ha.py`** now answers `GET /api/` and `GET /api/states`, so the connection test and the picker work against it.
+- **Smoke test** with the real binary, `mock_ha.py` and live ECCC: seeded from `HA_URL`/`HA_TOKEN`, test-ha OK, entity list, "montreal" found Montréal, and a PUT (French, Montréal, two renamed tiles) gave a French frame with live Montréal weather within seconds.
+- **Not yet checked:** the page in a browser (no browser or JS runtime on the dev machine), and the exit criterion on the real Kindle.
 
 **Exit:** Changing rotation, switches, language or credentials on a phone shows up on the Kindle within one poll cycle.
 
