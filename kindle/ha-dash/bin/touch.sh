@@ -12,6 +12,11 @@ log "start, $TOUCH_DEV"
 # every event queued so far (16 bytes each on this 32-bit kernel); od then
 # formats that batch and exits, flushing it.
 #
+# The device stays open across those reads (the inner loop's stdin). evdev
+# only queues events for readers that have it open, so reopening it for
+# each dd drops whatever arrives in between: often the lift that ends a
+# tap, or the touch-down that starts one.
+#
 # od -td4 -w16 gives one event per line: sec usec type+code*65536 value.
 # -v keeps repeated lines (od would print "*" for them).
 while :; do
@@ -20,7 +25,10 @@ while :; do
     sleep 10
     continue
   fi
-  dd if="$TOUCH_DEV" bs=1536 count=1 2>/dev/null | od -An -v -td4 -w16
+  while [ -e "$TOUCH_DEV" ]; do
+    dd bs=1536 count=1 2>/dev/null | od -An -v -td4 -w16
+  done <"$TOUCH_DEV"
+  sleep 1
 done | awk -v url="$URL" -v run="$RUN" -v bin="$BIN" -v setsid="$SETSID" \
   -v tapmax="$TAP_MAX" -v move="$TAP_MOVE" -v hold="$EXIT_HOLD" -v corner="$EXIT_CORNER" '
 BEGIN {

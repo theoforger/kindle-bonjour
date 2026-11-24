@@ -267,10 +267,15 @@ func (a *App) Toggle(ctx context.Context, id string) error {
 	if err := NewHAClient(cfg.HA).Toggle(ctx, id); err != nil {
 		return err
 	}
-	a.Trigger()
-	// HA often reports the new state a moment later; read again then.
-	time.AfterFunc(a.afterOp, a.Trigger)
+	a.refreshSoon()
 	return nil
+}
+
+// refreshSoon re-reads HA now and again a moment later, since HA often
+// reports the new state only after the call returns.
+func (a *App) refreshSoon() {
+	a.Trigger()
+	time.AfterFunc(a.afterOp, a.Trigger)
 }
 
 // Tap marks a configured entity pending, shows that at once, and toggles
@@ -304,7 +309,9 @@ func (a *App) Tap(id string) error {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		err := a.Toggle(ctx, id)
+		// Not Toggle: doneAt must be set before the re-reads, or the first
+		// one can't clear the pending border.
+		err := NewHAClient(cfg.HA).Toggle(ctx, id)
 		a.mu.Lock()
 		if p, ok := a.pending[id]; ok {
 			if err != nil {
@@ -317,7 +324,9 @@ func (a *App) Tap(id string) error {
 		if err != nil {
 			log.Printf("tap %s: %v", id, err)
 			a.republish()
+			return
 		}
+		a.refreshSoon()
 	}()
 	return nil
 }
