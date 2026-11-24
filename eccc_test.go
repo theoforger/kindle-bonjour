@@ -1,0 +1,302 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func fixture(t *testing.T) []byte {
+	b, err := os.ReadFile("testdata/eccc/citypage_en.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestParseCitypage(t *testing.T) {
+	w, err := ParseCitypage(fixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := map[string][2]string{
+		"location":  {w.Location, "Toronto"},
+		"station":   {w.Station, "Toronto City"},
+		"observed":  {w.Observed, "13:00 EST"},
+		"condition": {w.Condition, "Mostly Cloudy"},
+		"icon":      {w.Icon, "03"},
+		"temp":      {w.Temp, "-2.4"},
+		"feels":     {w.Feels, "-8"},
+		"humidity":  {w.Humidity, "74"},
+		"pressure":  {w.Pressure, "101.7"},
+		"tendency":  {w.Tendency, "rising"},
+		"wind":      {w.Wind, "WNW 22 km/h (gust 38)"},
+	}
+	for k, v := range checks {
+		if v[0] != v[1] {
+			t.Errorf("%s = %q, want %q", k, v[0], v[1])
+		}
+	}
+	if len(w.Warnings) != 1 || w.Warnings[0] != "YELLOW WARNING - WIND" {
+		t.Errorf("warnings %q", w.Warnings)
+	}
+	if len(w.Forecast) < 6 {
+		t.Fatalf("only %d forecast periods", len(w.Forecast))
+	}
+	p0, p1 := w.Forecast[0], w.Forecast[1]
+	if p0 != (Period{Name: "Today", Icon: "03", Summary: "Mostly cloudy", POP: "30", Temp: "-1", Class: "high"}) {
+		t.Errorf("period 0 %+v", p0)
+	}
+	if p1.Name != "Tonight" || p1.POP != "" || p1.Temp != "-8" || p1.Class != "low" {
+		t.Errorf("period 1 %+v", p1)
+	}
+}
+
+func TestParseIgnoresUnknownElements(t *testing.T) {
+	b := fixture(t)
+	b = bytes.Replace(b, []byte("<currentConditions>"),
+		[]byte(`<currentConditions><airQuality index="3"><new>x</new></airQuality>`), 1)
+	b = bytes.Replace(b, []byte("</siteData>"), []byte(`<brandNewSection a="1"><x/></brandNewSection></siteData>`), 1)
+	w, err := ParseCitypage(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Temp != "-2.4" {
+		t.Fatalf("temp %q", w.Temp)
+	}
+}
+
+func TestParseLatin1(t *testing.T) {
+	doc := "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><siteData><location><name>Montr\xe9al</name></location>" +
+		"<currentConditions><condition>Ensoleill\xe9</condition></currentConditions></siteData>"
+	w, err := ParseCitypage([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Location != "Montréal" || w.Condition != "Ensoleillé" {
+		t.Fatalf("%q %q", w.Location, w.Condition)
+	}
+}
+
+func TestParseBadXML(t *testing.T) {
+	if _, err := ParseCitypage([]byte("<siteData><oops")); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+// fakeDD is a datamart serving the fixture in the dated layout and/or the legacy path.
+type fakeDD struct {
+	*httptest.Server
+	mu      sync.Mutex
+	hour    string // hour directory that has files
+	dated   bool
+	legacy  bool
+	fail    bool
+	body    []byte
+	fetched []string
+}
+
+func newFakeDD(t *testing.T) *fakeDD {
+	f := &fakeDD{hour: "18", dated: true, body: fixture(t)}
+	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.fetched = append(f.fetched, r.URL.Path)
+		if f.fail {
+			http.Error(w, "boom", 500)
+			return
+		}
+		dir := "/today/citypage_weather/ON/" + f.hour + "/"
+		switch {
+		case f.dated && r.URL.Path == dir:
+			fmt.Fprintf(w, `<a href="20261123T180500.111Z_MSC_CitypageWeather_s0000458_en.xml">x</a>
+<a href="20261123T183000.222Z_MSC_CitypageWeather_s0000458_en.xml">x</a>
+<a href="20261123T190000.333Z_MSC_CitypageWeather_s0000458_fr.xml">x</a>
+<a href="20261123T190000.333Z_MSC_CitypageWeather_s0000999_en.xml">x</a>`)
+		case f.dated && r.URL.Path == dir+"20261123T183000.222Z_MSC_CitypageWeather_s0000458_en.xml":
+			w.Write(f.body)
+		case f.legacy && r.URL.Path == "/citypage_weather/xml/ON/s0000458_e.xml":
+			w.Write(f.body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(f.Close)
+	return f
+}
+
+func (f *fakeDD) paths() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p := f.fetched
+	f.fetched = nil
+	return p
+}
+
+func (f *fakeDD) set(fn func(*fakeDD)) {
+	f.mu.Lock()
+	fn(f)
+	f.mu.Unlock()
+}
+
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) Now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
+func (c *fakeClock) Add(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
+func newWeather(dd *fakeDD, clk *fakeClock) *WeatherService {
+	w := NewWeatherService()
+	w.DD, w.Now = dd.URL, clk.Now
+	return w
+}
+
+var torontoCfg = ECCCConfig{Site: "s0000458", Province: "ON", Lang: "en", RefreshSeconds: 600}
+
+func TestWeatherFindsNewestFile(t *testing.T) {
+	dd := newFakeDD(t)
+	dd.hour = "17" // current hour (18 UTC) is empty, so it looks back one hour
+	clk := &fakeClock{t: time.Date(2026, 11, 23, 18, 20, 0, 0, time.UTC)}
+	w := newWeather(dd, clk)
+	if !w.Refresh(context.Background(), torontoCfg) {
+		t.Fatal("first refresh should run")
+	}
+	st := w.Status()
+	if st.Weather == nil || st.Weather.Location != "Toronto" || st.Stale || st.Err != "" {
+		t.Fatalf("status %+v", st)
+	}
+	p := dd.paths()
+	if last := p[len(p)-1]; !strings.HasSuffix(last, "/17/20261123T183000.222Z_MSC_CitypageWeather_s0000458_en.xml") {
+		t.Fatalf("fetched %q", p)
+	}
+}
+
+func TestWeatherLegacyFallback(t *testing.T) {
+	dd := newFakeDD(t)
+	dd.dated, dd.legacy = false, true
+	clk := &fakeClock{t: time.Date(2026, 11, 23, 18, 0, 0, 0, time.UTC)}
+	w := newWeather(dd, clk)
+	w.Refresh(context.Background(), torontoCfg)
+	if st := w.Status(); st.Weather == nil || st.Err != "" {
+		t.Fatalf("legacy fallback failed: %+v", st)
+	}
+}
+
+func TestWeatherCacheAndStale(t *testing.T) {
+	dd := newFakeDD(t)
+	clk := &fakeClock{t: time.Date(2026, 11, 23, 18, 0, 0, 0, time.UTC)}
+	w := newWeather(dd, clk)
+	ctx := context.Background()
+
+	w.Refresh(ctx, torontoCfg)
+	dd.paths()
+	clk.Add(5 * time.Minute)
+	if w.Refresh(ctx, torontoCfg) || len(dd.paths()) != 0 {
+		t.Fatal("refreshed inside the 10-minute cache")
+	}
+
+	// Refresh fails: keep the last good data, marked stale.
+	clk.Add(6 * time.Minute)
+	dd.set(func(f *fakeDD) { f.fail = true })
+	if !w.Refresh(ctx, torontoCfg) {
+		t.Fatal("should refresh after the TTL")
+	}
+	st := w.Status()
+	if st.Weather == nil || st.Weather.Temp != "-2.4" || !st.Stale || st.Err == "" {
+		t.Fatalf("after failure: %+v", st)
+	}
+
+	// Retries after a minute, not after the full TTL.
+	clk.Add(30 * time.Second)
+	if w.Refresh(ctx, torontoCfg) {
+		t.Fatal("retried too soon")
+	}
+	clk.Add(31 * time.Second)
+	dd.set(func(f *fakeDD) { f.fail = false })
+	if !w.Refresh(ctx, torontoCfg) {
+		t.Fatal("no retry after a minute")
+	}
+	if st := w.Status(); st.Stale || st.Err != "" {
+		t.Fatalf("recovered: %+v", st)
+	}
+
+	// Data that hasn't refreshed for over an hour is stale even without an error.
+	clk.Add(61 * time.Minute)
+	if !w.Status().Stale {
+		t.Fatal("old data not stale")
+	}
+}
+
+func TestWeatherConfigChangeResetsCache(t *testing.T) {
+	dd := newFakeDD(t)
+	clk := &fakeClock{t: time.Date(2026, 11, 23, 18, 0, 0, 0, time.UTC)}
+	w := newWeather(dd, clk)
+	w.Refresh(context.Background(), torontoCfg)
+	other := torontoCfg
+	other.Site = "s0000999"
+	dd.set(func(f *fakeDD) { f.fail = true })
+	if !w.Refresh(context.Background(), other) {
+		t.Fatal("new site should refresh at once")
+	}
+	if st := w.Status(); st.Weather != nil {
+		t.Fatal("old site's weather shown for the new site")
+	}
+	if w.Refresh(context.Background(), ECCCConfig{RefreshSeconds: 600}) {
+		t.Fatal("unconfigured weather should not fetch")
+	}
+}
+
+func TestIconCache(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Path != "/03.gif" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte("GIF89a-fake"))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	c := NewIconCache(dir)
+	c.BaseURL = srv.URL + "/"
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		b, err := c.Get(ctx, "03")
+		if err != nil || string(b) != "GIF89a-fake" {
+			t.Fatal(b, err)
+		}
+	}
+	if hits != 1 {
+		t.Fatalf("%d downloads", hits)
+	}
+	// A new cache on the same dir reads the file, not the network.
+	c2 := NewIconCache(dir)
+	c2.BaseURL = srv.URL + "/"
+	if _, err := c2.Get(ctx, "03"); err != nil || hits != 1 {
+		t.Fatalf("disk cache not used: %v hits=%d", err, hits)
+	}
+	if _, err := c.Get(ctx, "../etc"); err == nil {
+		t.Fatal("bad code accepted")
+	}
+	if _, err := c.Get(ctx, "99"); err == nil {
+		t.Fatal("404 icon should fail")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "99.gif")); err == nil {
+		t.Fatal("failed download was cached")
+	}
+}

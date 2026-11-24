@@ -48,14 +48,22 @@ This breaks the build order in `PLAN.md` §7 into stages. The design is **server
 
 **Goal:** Rewrite the prototype's server logic in Go.
 
-- [ ] `config.go`: atomic JSON store, version counter, file written with 0600 permissions, token never returned.
-- [ ] `ha.go`: read states, toggle (rejects entities that aren't configured), entity list.
-- [ ] `eccc.go`: find the newest file in the hourly directory, fall back to the old URL, 10-minute cache, mark stale data "(old)", ignore unknown XML elements, icon cache.
-- [ ] Version and long-poll logic: the version increases only when visible state changes. It wakes waiting requests and times out at about 25 s with `204`.
-- [ ] `/healthz`, `/api/toggle`.
-- [ ] Tests: `httptest` fake for HA, plus the ECCC fixture.
+- [x] `config.go`: atomic JSON store, version counter, file written with 0600 permissions, token never returned.
+- [x] `ha.go`: read states, toggle (rejects entities that aren't configured), entity list.
+- [x] `eccc.go`: find the newest file in the hourly directory, fall back to the old URL, 10-minute cache, mark stale data "(old)", ignore unknown XML elements, icon cache.
+- [x] Version and long-poll logic: the version increases only when visible state changes. It wakes waiting requests and times out at about 25 s with `204`.
+- [x] `/healthz`, `/api/toggle`.
+- [x] Tests: `httptest` fake for HA, plus the ECCC fixture.
 
-**Exit:** `go test ./...` passes, covering the long-poll, config persistence, write-only token, unlisted-entity rejection and stale weather.
+**Notes (done, 2026-11-23):**
+- Code: `config.go`, `ha.go`, `eccc.go`, `state.go` (the `Hub` versioning plus the `App` refresh loop), `handlers.go`, `main.go`. Standard library only for now.
+- The version counter starts from the server's start time in milliseconds, so a Kindle still holding a version from before a restart never matches by accident.
+- "Visible state" is a JSON `Snapshot` (switches, HA error, weather, stale flag, clock, display settings). The version goes up only when it changes. HA is polled every 3 s, the minute boundary and config saves trigger a refresh, and toggles trigger an extra read 0.7 s later.
+- A temporary `GET /api/state?v=N` long-poll returns the snapshot as JSON. `/frame.png` will use the same wait in Stage 2.
+- Weather is marked stale after a failed refresh or when the data is over an hour old. It retries 60 s after a failure.
+- Smoke test against `testdata/mock_ha.py` plus the live ECCC datamart worked: real Toronto data, toggle, and the long-poll woke at once.
+
+**Exit (met):** `go test -race ./...` passes, covering the long-poll, config persistence, write-only token, unlisted-entity rejection and stale weather.
 
 ---
 
