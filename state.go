@@ -13,13 +13,14 @@ import (
 // Snapshot is everything visible on a frame. The version goes up only when
 // a new snapshot differs from the current one.
 type Snapshot struct {
+	Language       string        `json:"language"` // en or fr; the renderer looks up text with T
 	Setup          bool          `json:"setup"`
 	Switches       []SwitchState `json:"switches"`
-	HAError        string        `json:"ha_error,omitempty"`
+	HAError        string        `json:"ha_error,omitempty"` // message key, e.g. ha_unreachable
 	Weather        *Weather      `json:"weather"`
 	WeatherStale   bool          `json:"weather_stale"`
-	WeatherUpdated string        `json:"weather_updated,omitempty"` // local HH:MM of last good fetch
-	Clock          string        `json:"clock,omitempty"`           // HH:MM, empty when the clock is off
+	WeatherUpdated string        `json:"weather_updated,omitempty"` // local time of last good fetch, localized
+	Clock          string        `json:"clock,omitempty"`           // localized time, empty when the clock is off
 	Date           string        `json:"date,omitempty"`
 	Display        DisplayConfig `json:"display"`
 }
@@ -111,7 +112,7 @@ type App struct {
 func NewApp(cfg *ConfigStore, w *WeatherService, icons *IconCache) *App {
 	a := &App{Config: cfg, Weather: w, Icons: icons, Hub: NewHub(time.Now()), Now: time.Now,
 		HAPoll: 3 * time.Second, trigger: make(chan struct{}, 1), afterOp: 700 * time.Millisecond}
-	cfg.OnChange(a.Trigger)
+	cfg.OnChange(func() { a.Weather.Wake(); a.Trigger() })
 	return a
 }
 
@@ -129,7 +130,8 @@ func (a *App) Refresh(ctx context.Context) uint64 {
 	defer a.refreshMu.Unlock()
 	cfg := a.Config.Get()
 	now := a.Now()
-	s := Snapshot{Setup: cfg.SetupMode(), Display: cfg.Display, Switches: []SwitchState{}}
+	lang := cfg.Language
+	s := Snapshot{Language: lang, Setup: cfg.SetupMode(), Display: cfg.Display, Switches: []SwitchState{}}
 	if !s.Setup {
 		rctx, cancel := context.WithTimeout(ctx, 6*time.Second)
 		sw, err := NewHAClient(cfg.HA).ReadStates(rctx, cfg.Entities)
@@ -141,23 +143,23 @@ func (a *App) Refresh(ctx context.Context) uint64 {
 				log.Printf("home assistant: %v", err)
 			}
 			a.haErr = err
-			s.HAError = "Home Assistant unreachable"
+			s.HAError = "ha_unreachable"
 			if errors.Is(err, ErrUnauthorized) {
-				s.HAError = "Home Assistant token rejected"
+				s.HAError = "ha_token_rejected"
 			}
 		} else if err == nil {
 			a.haErr, a.haOKAt = nil, now
 		}
 		a.mu.Unlock()
 	}
-	ws := a.Weather.Status()
+	ws := a.Weather.Status(cfg.WeatherSource())
 	s.Weather, s.WeatherStale = ws.Weather, ws.Stale
 	if !ws.FetchedAt.IsZero() {
-		s.WeatherUpdated = ws.FetchedAt.In(now.Location()).Format("15:04")
+		s.WeatherUpdated = formatClock(lang, ws.FetchedAt.In(now.Location()))
 	}
 	if cfg.Display.Clock {
-		s.Clock = now.Format("15:04")
-		s.Date = now.Format("Mon Jan 2")
+		s.Clock = formatClock(lang, now)
+		s.Date = formatDate(lang, now)
 	}
 	return a.Hub.Publish(s)
 }
@@ -165,7 +167,7 @@ func (a *App) Refresh(ctx context.Context) uint64 {
 // Run refreshes on every HA poll tick, on triggers and at each minute
 // boundary, until ctx ends. It also runs the weather loop.
 func (a *App) Run(ctx context.Context) {
-	go a.Weather.Run(ctx, func() ECCCConfig { return a.Config.Get().ECCC }, a.Trigger)
+	go a.Weather.Run(ctx, func() ECCCConfig { return a.Config.Get().WeatherSource() }, a.Trigger)
 	tick := time.NewTicker(a.HAPoll)
 	defer tick.Stop()
 	for {

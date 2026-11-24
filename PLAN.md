@@ -24,7 +24,7 @@ A fullscreen, always-on **landscape** dashboard on a jailbroken Kindle Paperwhit
 | `GET /api/admin/eccc-sites` | ECCC site search |
 | `GET /healthz` | Health check |
 
-**Source layout:** `main.go`, `config.go` (atomic JSON store plus version counter), `ha.go`, `eccc.go` (`encoding/xml` structs), `render.go` (layout, drawing, rotation), `layout.go` (tile rectangles shared by drawing and tap matching), `handlers.go`, `web/settings.html`, `*_test.go`, `kindle/` (KUAL extension).
+**Source layout:** `main.go`, `config.go` (atomic JSON store plus version counter), `i18n.go` (English and French strings), `ha.go`, `eccc.go` (`encoding/xml` structs), `render.go` (layout, drawing, rotation), `layout.go` (tile rectangles shared by drawing and tap matching), `handlers.go`, `web/settings.html`, `*_test.go`, `kindle/` (KUAL extension).
 
 **Dependencies:** standard library plus `golang.org/x/image` only. That package supplies `font/opentype`, the built-in Go fonts (`font/gofont`, BSD-licensed, so no font file to ship) and `draw` for scaling the ECCC icons. `CGO_ENABLED=0` still works.
 
@@ -37,6 +37,7 @@ A fullscreen, always-on **landscape** dashboard on a jailbroken Kindle Paperwhit
 - **Header:** clock (server time, minute resolution) and a small "last update" or "(old)" marker.
 - **E-ink rules:** pure black and white plus a few grays, no thin gray text, and large hit targets (at least about 9 mm, or roughly 110 px at 300 ppi).
 - **Versioning:** the frame is drawn again and the version increases only when something visible changes (state, weather, config or the clock minute). The server keeps the tile rectangles for recent versions so a tap is matched against the frame the user actually saw.
+- **Language:** English or French, chosen with one setting. The frame's own text (tile states, labels, errors, clock and date formats) comes from the catalog in `i18n.go`. The weather text comes from ECCC already in that language, because the server fetches the `_en` or `_fr` citypage. Switching language is a visible change, so the Kindle redraws within one poll.
 - **Settings preview:** the settings page shows `/frame.png` directly, so the preview is exactly what the Kindle shows.
 
 ## 4. Kindle agent (KUAL extension)
@@ -55,7 +56,8 @@ A fullscreen, always-on **landscape** dashboard on a jailbroken Kindle Paperwhit
 ## 5. Settings page
 - **HA connection:** URL, masked token, "Test connection" button.
 - **Switches:** Search and filter HA entities, add them, rename, drag to reorder, remove.
-- **Weather:** Province and city search, language, refresh interval.
+- **Language:** English / Français toggle. It switches the settings page itself, the frame text and the ECCC feed language together.
+- **Weather:** Province and city search, refresh interval.
 - **Display:** Rotation, left/right split, tile columns, flash interval, clock on/off.
 - **Live preview:** `<img src="/frame.png">`, reloaded whenever the version changes.
 - **Access:** Optional admin password.

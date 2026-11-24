@@ -61,6 +61,7 @@ This breaks the build order in `PLAN.md` §7 into stages. The design is **server
 - "Visible state" is a JSON `Snapshot` (switches, HA error, weather, stale flag, clock, display settings). The version goes up only when it changes. HA is polled every 3 s, the minute boundary and config saves trigger a refresh, and toggles trigger an extra read 0.7 s later.
 - A temporary `GET /api/state?v=N` long-poll returns the snapshot as JSON. `/frame.png` will use the same wait in Stage 2.
 - Weather is marked stale after a failed refresh or when the data is over an hour old. It retries 60 s after a failure.
+- **English and French** (added after the first pass): one top-level `language` setting (`en`/`fr`, default `en`) replaces `eccc.lang`, and older configs are migrated when loaded. `i18n.go` holds every server-drawn string in both languages (a test checks that none is missing), plus the clock, date and observation-time formats (`18:00` / `18 h 00`, `Mon Nov 23` / `lun. 23 nov.`) and the wind text. The snapshot carries `language`, and `ha_error` is now a message key. Weather is cached per site and language, so after a switch the old language is never shown, and a config save wakes the weather loop to refetch straight away. Added the `testdata/eccc/citypage_fr.xml` fixture (a real file): French observation times have no " at ", so the time is now read from `<hour>`/`<minute>`.
 - Smoke test against `testdata/mock_ha.py` plus the live ECCC datamart worked: real Toronto data, toggle, and the long-poll woke at once.
 
 **Exit (met):** `go test -race ./...` passes, covering the long-poll, config persistence, write-only token, unlisted-entity rejection and stale weather.
@@ -75,11 +76,13 @@ Server:
 - [ ] `layout.go`: computes the landscape canvas (1448×1072), the tile grid, the weather pane and the header. It returns tile rectangles.
 - [ ] `render.go`: draws with `x/image/font/opentype` and the Go fonts, scales ECCC icons, rotates into the 1072×1448 panel frame and encodes a grayscale PNG.
 - [ ] `/frame.png?v=N` (sets `X-Version`, and `X-Refresh: full` when the flash interval is due) and `POST /api/tap?x=&y=&v=` (inverse rotation, hit test against version `v`, pending dotted border, toggle).
+- [ ] All frame text goes through `T(snapshot.Language, key)` in `i18n.go`, and nothing in `render.go` is hard-coded in English. Check that the longest French strings (`ÉTEINT`, `LANCER`, the long forecast names like "Ce soir et cette nuit") fit their boxes. Golden images in both languages.
 - [ ] `GET /` debug page.
 - [ ] Tests: golden-image tests for each rotation, and tap matching at all 4 rotations.
 
 Kindle (`kindle/ha-dash/`):
-- [ ] `frames.sh`: long-poll loop, `fbink` drawing, full flash on request, offline back-off and marker, Wi-Fi re-enable.
+- [ ] `frames.sh`: long-poll loop, `fbink` drawing, full flash on request, offline back-off and marker, Wi-Fi re-enable. The offline marker can't ask the server for text, so it uses a symbol that needs no language (or the agent keeps the last `X-Language` header in a file).
+- [ ] The exit gesture's on-screen confirmation (if any) follows the same rule.
 - [ ] `touch.sh`: `od | awk` event decoder, calibration mapping, `POST /api/tap` when a finger lifts, exit gesture (long press of 3 s or more, top-left).
 - [ ] `start.sh` and `stop.sh`: stop and start the interface, `preventScreenSaver`, keep-alive, PID handling. Nothing starts at boot.
 - [ ] **Self-healing** (for the freezes the user has seen after hours or days):
@@ -98,9 +101,11 @@ Kindle (`kindle/ha-dash/`):
 
 - [ ] `/api/admin/config`, `entities`, `test-ha` and `eccc-sites`, plus an optional admin password.
 - [ ] `web/settings.html` sections: HA connection, entity picker (search, rename, drag to reorder, remove), weather location, display options (rotation, split, columns, flash interval, clock), live preview using `/frame.png`.
+- [ ] **Language toggle (English / Français)** in the settings page. It saves `language`, and the frame, the weather feed and the settings page all switch. The settings page has its own en/fr string table and starts from the saved language. Admin API errors return a message key the page translates.
+- [ ] ECCC site search shows city names in the chosen language (`siteList.xml` has both `nameEn` and `nameFr`).
 - [ ] Setup mode when there's no config, with a "configure me" frame, and seeding from `HA_URL`, `HA_TOKEN` and `PORT`.
 
-**Exit:** Changing rotation, switches or credentials on a phone shows up on the Kindle within one poll cycle.
+**Exit:** Changing rotation, switches, language or credentials on a phone shows up on the Kindle within one poll cycle.
 
 ---
 

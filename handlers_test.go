@@ -142,7 +142,7 @@ func TestVersionOnlyChangesWithVisibleState(t *testing.T) {
 		t.Fatal("rotation change not visible")
 	}
 	v++
-	e.app.Weather.Refresh(ctx, e.store.Get().ECCC)
+	e.app.Weather.Refresh(ctx, e.store.Get().WeatherSource())
 	if v2 := e.app.Refresh(ctx); v2 != v+1 {
 		t.Fatal("weather arrival not visible")
 	}
@@ -161,7 +161,7 @@ func TestVersionOnlyChangesWithVisibleState(t *testing.T) {
 func TestStaleWeatherInSnapshot(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	e.app.Weather.Refresh(ctx, e.store.Get().ECCC)
+	e.app.Weather.Refresh(ctx, e.store.Get().WeatherSource())
 	e.app.Refresh(ctx)
 	s, _, _ := e.app.Hub.Current()
 	if s.Weather == nil || s.WeatherStale || s.WeatherUpdated != "18:00" {
@@ -169,11 +169,50 @@ func TestStaleWeatherInSnapshot(t *testing.T) {
 	}
 	e.clk.Add(11 * time.Minute)
 	e.dd.set(func(f *fakeDD) { f.fail = true })
-	e.app.Weather.Refresh(ctx, e.store.Get().ECCC)
+	e.app.Weather.Refresh(ctx, e.store.Get().WeatherSource())
 	e.app.Refresh(ctx)
 	s, _, _ = e.app.Hub.Current()
 	if s.Weather == nil || s.Weather.Temp != "-2.4" || !s.WeatherStale || s.WeatherUpdated != "18:00" {
 		t.Fatalf("stale: %+v", s)
+	}
+}
+
+func TestLanguageSwitch(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.app.Weather.Refresh(ctx, e.store.Get().WeatherSource())
+	v := e.app.Refresh(ctx)
+	s, _, _ := e.app.Hub.Current()
+	if s.Language != "en" || s.Clock != "18:00" || s.Date != "Mon Nov 23" || s.Weather.Condition != "Mostly Cloudy" {
+		t.Fatalf("english %+v", s)
+	}
+
+	e.store.Update(func(c *Config) error { c.Language = LangFR; return nil })
+	if v2 := e.app.Refresh(ctx); v2 != v+1 {
+		t.Fatal("language change not visible")
+	}
+	s, _, _ = e.app.Hub.Current()
+	if s.Language != "fr" || s.Clock != "18 h 00" || s.Date != "lun. 23 nov." {
+		t.Fatalf("french %+v", s)
+	}
+	// The weather cache belongs to the old language: dropped, then refetched in French.
+	if s.Weather != nil {
+		t.Fatal("english weather kept after switching to french")
+	}
+	if !e.app.Weather.Refresh(ctx, e.store.Get().WeatherSource()) {
+		t.Fatal("no refetch after language change")
+	}
+	e.app.Refresh(ctx)
+	s, _, _ = e.app.Hub.Current()
+	if s.Weather == nil || s.Weather.Condition != "Partiellement nuageux" {
+		t.Fatalf("french weather %+v", s.Weather)
+	}
+
+	e.ha.setDown(true)
+	e.app.Refresh(ctx)
+	s, _, _ = e.app.Hub.Current()
+	if T(s.Language, s.HAError) != "Home Assistant injoignable" {
+		t.Fatalf("ha error %q", s.HAError)
 	}
 }
 
@@ -288,4 +327,34 @@ func TestWaitBeforeFirstPublish(t *testing.T) {
 	if _, _, ok := h.Wait(ctx, 0); ok {
 		t.Fatal("nothing published yet, should time out")
 	}
+}
+
+// With the real run loop, a language save shows French weather well before
+// the 10-second weather tick.
+func TestRunRefetchesWeatherAfterSave(t *testing.T) {
+	e := newEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go e.app.Run(ctx)
+
+	waitFor := func(what string, ok func(Snapshot) bool) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		var v uint64
+		for time.Now().Before(deadline) {
+			wctx, c := context.WithDeadline(ctx, deadline)
+			s, nv, got := e.app.Hub.Wait(wctx, v)
+			c()
+			if got && ok(s) {
+				return
+			}
+			v = nv
+		}
+		t.Fatalf("timed out waiting for %s", what)
+	}
+	waitFor("english weather", func(s Snapshot) bool { return s.Weather != nil && s.Weather.Condition == "Mostly Cloudy" })
+	e.store.Update(func(c *Config) error { c.Language = LangFR; return nil })
+	waitFor("french weather", func(s Snapshot) bool {
+		return s.Language == "fr" && s.Weather != nil && s.Weather.Condition == "Partiellement nuageux"
+	})
 }

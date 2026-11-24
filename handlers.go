@@ -33,7 +33,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	_, version, _ := s.App.Hub.Current()
 	haErr, haOK := s.App.HAStatus()
-	ws := s.App.Weather.Status()
+	ws := s.App.Weather.Status(s.App.Config.Get().WeatherSource())
 	out := map[string]any{
 		"status":  "ok",
 		"version": version,

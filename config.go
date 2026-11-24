@@ -24,7 +24,7 @@ type HAConfig struct {
 type ECCCConfig struct {
 	Site           string `json:"site"`     // e.g. s0000458
 	Province       string `json:"province"` // e.g. ON
-	Lang           string `json:"lang"`     // en or fr
+	Lang           string `json:"-"`        // filled from Config.Language, see WeatherSource
 	RefreshSeconds int    `json:"refresh_seconds"`
 	URLOverride    string `json:"url_override,omitempty"` // fixed XML URL, for testing
 }
@@ -37,8 +37,15 @@ type DisplayConfig struct {
 	Clock        bool    `json:"clock"`
 }
 
+// Languages the dashboard supports.
+const (
+	LangEN = "en"
+	LangFR = "fr"
+)
+
 // Config is everything stored in config.json.
 type Config struct {
+	Language string        `json:"language"` // en or fr: frame text, weather feed and settings page
 	HA       HAConfig      `json:"home_assistant"`
 	Entities []Entity      `json:"entities"`
 	ECCC     ECCCConfig    `json:"eccc"`
@@ -48,14 +55,22 @@ type Config struct {
 // DefaultConfig is used when there is no config file yet (setup mode).
 func DefaultConfig() Config {
 	return Config{
+		Language: LangEN,
 		Entities: []Entity{},
-		ECCC:     ECCCConfig{Lang: "en", RefreshSeconds: 600},
+		ECCC:     ECCCConfig{RefreshSeconds: 600},
 		Display:  DisplayConfig{Rotation: 0, Split: 0.55, Columns: 2, FlashMinutes: 30, Clock: true},
 	}
 }
 
 // SetupMode reports whether the config is too incomplete to reach HA.
 func (c Config) SetupMode() bool { return c.HA.URL == "" || c.HA.Token == "" }
+
+// WeatherSource is the ECCC config with the feed language set from Language.
+func (c Config) WeatherSource() ECCCConfig {
+	e := c.ECCC
+	e.Lang = c.Language
+	return e
+}
 
 func (c Config) clone() Config {
 	c.Entities = append([]Entity(nil), c.Entities...)
@@ -89,12 +104,13 @@ func (c *Config) Validate() error {
 	}
 	c.ECCC.Province = strings.ToUpper(strings.TrimSpace(c.ECCC.Province))
 	c.ECCC.Site = strings.TrimSpace(c.ECCC.Site)
-	switch c.ECCC.Lang {
+	c.Language = strings.ToLower(strings.TrimSpace(c.Language))
+	switch c.Language {
 	case "":
-		c.ECCC.Lang = "en"
-	case "en", "fr":
+		c.Language = LangEN
+	case LangEN, LangFR:
 	default:
-		return fmt.Errorf("eccc.lang must be en or fr")
+		return fmt.Errorf("language must be en or fr")
 	}
 	if c.ECCC.RefreshSeconds == 0 {
 		c.ECCC.RefreshSeconds = 600
@@ -141,7 +157,8 @@ func validEntityID(id string) bool {
 
 // PublicConfig is the config as the admin API returns it: no token.
 type PublicConfig struct {
-	HA struct {
+	Language string `json:"language"`
+	HA       struct {
 		URL      string `json:"url"`
 		TokenSet bool   `json:"token_set"`
 	} `json:"home_assistant"`
@@ -172,8 +189,19 @@ func LoadConfig(path string) (*ConfigStore, error) {
 		return nil, err
 	}
 	cfg := DefaultConfig()
+	cfg.Language = ""
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if cfg.Language == "" {
+		// Older configs set the language as eccc.lang.
+		var old struct {
+			ECCC struct {
+				Lang string `json:"lang"`
+			} `json:"eccc"`
+		}
+		json.Unmarshal(b, &old)
+		cfg.Language = old.ECCC.Lang
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -208,6 +236,7 @@ func (s *ConfigStore) Public() PublicConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var p PublicConfig
+	p.Language = s.cfg.Language
 	p.HA.URL = s.cfg.HA.URL
 	p.HA.TokenSet = s.cfg.HA.Token != ""
 	p.Entities = s.cfg.clone().Entities

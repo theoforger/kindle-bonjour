@@ -29,7 +29,7 @@ const (
 type Weather struct {
 	Location   string   `json:"location"`
 	Station    string   `json:"station"`
-	Observed   string   `json:"observed"` // local time text, e.g. "13:00 EST"
+	Observed   string   `json:"observed"` // local time, e.g. "13:00 EST" or "13:00 HNE"
 	Condition  string   `json:"condition"`
 	Icon       string   `json:"icon"`
 	Temp       string   `json:"temp"`
@@ -38,9 +38,25 @@ type Weather struct {
 	Pressure   string   `json:"pressure"`
 	Tendency   string   `json:"tendency"`
 	Visibility string   `json:"visibility"`
-	Wind       string   `json:"wind"`
+	Wind       Wind     `json:"wind"`
 	Warnings   []string `json:"warnings"`
 	Forecast   []Period `json:"forecast"`
+}
+
+// Wind is kept as parts; the frame adds the localized labels (see WindText).
+type Wind struct {
+	Direction string `json:"direction"` // as sent: WNW in English, ONO in French
+	Speed     string `json:"speed"`     // km/h, or "calm"/"calme"
+	Gust      string `json:"gust"`
+}
+
+// Calm reports whether there is no wind to show a speed for.
+func (w Wind) Calm() bool {
+	switch strings.ToLower(w.Speed) {
+	case "calm", "calme", "0", "00":
+		return true
+	}
+	return false
 }
 
 type Period struct {
@@ -68,6 +84,8 @@ type xSiteData struct {
 		DateTimes []struct {
 			Name    string `xml:"name,attr"`
 			Zone    string `xml:"zone,attr"`
+			Hour    string `xml:"hour"`
+			Minute  string `xml:"minute"`
 			Summary string `xml:"textSummary"`
 		} `xml:"dateTime"`
 		Condition string `xml:"condition"`
@@ -117,13 +135,19 @@ func ParseCitypage(data []byte) (*Weather, error) {
 	if c := x.Current; c != nil {
 		w.Station = t(c.Station)
 		for _, dt := range c.DateTimes {
-			if dt.Name == "observation" && dt.Zone != "" && dt.Zone != "UTC" {
-				s := t(dt.Summary)
-				if _, after, ok := strings.Cut(s, " at "); ok {
-					s = after
-				}
-				w.Observed = s
+			if dt.Name != "observation" || dt.Zone == "" || dt.Zone == "UTC" {
+				continue
 			}
+			if h, m := t(dt.Hour), t(dt.Minute); h != "" && m != "" {
+				w.Observed = h + ":" + m + " " + dt.Zone
+				continue
+			}
+			// No structured time: use the text, e.g. "Monday ... at 13:00 EST".
+			s := t(dt.Summary)
+			if _, after, ok := strings.Cut(s, " at "); ok {
+				s = after
+			}
+			w.Observed = s
 		}
 		w.Condition = t(c.Condition)
 		w.Icon = t(c.IconCode)
@@ -136,17 +160,7 @@ func ParseCitypage(data []byte) (*Weather, error) {
 		w.Pressure = t(c.Pressure.Value)
 		w.Tendency = t(c.Pressure.Tendency)
 		w.Visibility = t(c.Visibility)
-		speed, gust, dir := t(c.Wind.Speed), t(c.Wind.Gust), t(c.Wind.Direction)
-		if speed != "" {
-			wind := strings.TrimSpace(dir + " " + speed)
-			if l := strings.ToLower(speed); l != "calm" && l != "0" {
-				wind += " km/h"
-			}
-			if gust != "" {
-				wind += " (gust " + gust + ")"
-			}
-			w.Wind = wind
-		}
+		w.Wind = Wind{Direction: t(c.Wind.Direction), Speed: t(c.Wind.Speed), Gust: t(c.Wind.Gust)}
 	}
 	for _, f := range x.Forecasts {
 		p := Period{Name: t(f.Period.Name), Icon: t(f.Abbr.IconCode), Summary: t(f.Abbr.Summary), POP: t(f.Abbr.POP)}
@@ -212,7 +226,8 @@ type WeatherService struct {
 	Client *http.Client
 	Now    func() time.Time
 
-	refreshMu sync.Mutex // one refresh at a time
+	refreshMu sync.Mutex    // one refresh at a time
+	wake      chan struct{} // makes Run check again now
 
 	mu        sync.Mutex
 	key       string // config the cache belongs to
@@ -224,7 +239,8 @@ type WeatherService struct {
 }
 
 func NewWeatherService() *WeatherService {
-	return &WeatherService{DD: defaultDD, Client: &http.Client{Timeout: 15 * time.Second}, Now: time.Now}
+	return &WeatherService{DD: defaultDD, Client: &http.Client{Timeout: 15 * time.Second}, Now: time.Now,
+		wake: make(chan struct{}, 1)}
 }
 
 func ecccKey(c ECCCConfig) string {
@@ -235,10 +251,23 @@ func ecccConfigured(c ECCCConfig) bool {
 	return c.URLOverride != "" || (c.Site != "" && c.Province != "")
 }
 
-// Status returns the cached weather. It never does network I/O.
-func (s *WeatherService) Status() WeatherStatus {
+// Wake makes Run check the config again now, e.g. after a settings save.
+func (s *WeatherService) Wake() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+// Status returns the cached weather for cfg. It never does network I/O.
+// A cache for another site or language counts as no data, so the frame
+// never shows the old city or language while the new one loads.
+func (s *WeatherService) Status(cfg ECCCConfig) WeatherStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if ecccKey(cfg) != s.key {
+		return WeatherStatus{}
+	}
 	st := WeatherStatus{Weather: s.data, FetchedAt: s.fetchedAt}
 	if s.lastErr != nil {
 		st.Err = s.lastErr.Error()
@@ -311,6 +340,7 @@ func (s *WeatherService) Run(ctx context.Context, cfg func() ECCCConfig, notify 
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-s.wake:
 		}
 	}
 }

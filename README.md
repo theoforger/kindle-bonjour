@@ -1,6 +1,6 @@
 # kindle-bonjour
 
-An always-on Home Assistant and Environment Canada weather dashboard for a jailbroken Kindle Paperwhite 3.
+An always-on Home Assistant and Environment Canada weather dashboard for a jailbroken Kindle Paperwhite 3, in English or French.
 
 A Go server draws the dashboard as an e-ink-friendly PNG. A small KUAL extension on the Kindle shows it fullscreen with FBInk and sends taps back to the server.
 

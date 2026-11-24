@@ -82,7 +82,7 @@ func TestConfigInvalidUpdateChangesNothing(t *testing.T) {
 		"entity":    func(c *Config) { c.Entities = append(c.Entities, Entity{ID: "nodot"}) },
 		"duplicate": func(c *Config) { c.Entities = append(c.Entities, c.Entities[0]) },
 		"url":       func(c *Config) { c.HA.URL = "ftp://x" },
-		"lang":      func(c *Config) { c.ECCC.Lang = "de" },
+		"language":  func(c *Config) { c.Language = "de" },
 	} {
 		if err := s.Update(func(c *Config) error { bad(c); return nil }); err == nil {
 			t.Errorf("%s: expected error", name)
@@ -90,6 +90,40 @@ func TestConfigInvalidUpdateChangesNothing(t *testing.T) {
 	}
 	if s.Version() != v || s.Get().Display.Rotation != 0 || len(s.Get().Entities) != 3 {
 		t.Fatal("rejected update changed the config")
+	}
+}
+
+func TestLanguage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	s, _ := LoadConfig(path)
+	if s.Get().Language != LangEN {
+		t.Fatalf("default %q", s.Get().Language)
+	}
+	cfg := testConfig("http://ha")
+	cfg.Language = " FR "
+	if err := s.Replace(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if s.Get().Language != LangFR || s.Public().Language != LangFR {
+		t.Fatal("language not saved")
+	}
+	if ws := s.Get().WeatherSource(); ws.Lang != LangFR {
+		t.Fatalf("weather feed language %q", ws.Lang)
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), `"lang"`) {
+		t.Fatalf("eccc.lang written to disk: %s", b)
+	}
+
+	// Older configs kept the language in eccc.lang.
+	os.WriteFile(path, []byte(`{"home_assistant":{"url":"http://ha","token":"t"},"eccc":{"site":"s1","province":"QC","lang":"fr"}}`), 0o600)
+	old, err := LoadConfig(path)
+	if err != nil || old.Get().Language != LangFR {
+		t.Fatalf("migration: %v %q", err, old.Get().Language)
+	}
+	os.WriteFile(path, []byte(`{"home_assistant":{"url":"http://ha","token":"t"}}`), 0o600)
+	if old, _ := LoadConfig(path); old.Get().Language != LangEN {
+		t.Fatalf("missing language: %q", old.Get().Language)
 	}
 }
 

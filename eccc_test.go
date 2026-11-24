@@ -38,12 +38,14 @@ func TestParseCitypage(t *testing.T) {
 		"humidity":  {w.Humidity, "74"},
 		"pressure":  {w.Pressure, "101.7"},
 		"tendency":  {w.Tendency, "rising"},
-		"wind":      {w.Wind, "WNW 22 km/h (gust 38)"},
 	}
 	for k, v := range checks {
 		if v[0] != v[1] {
 			t.Errorf("%s = %q, want %q", k, v[0], v[1])
 		}
+	}
+	if w.Wind != (Wind{Direction: "WNW", Speed: "22", Gust: "38"}) {
+		t.Errorf("wind %+v", w.Wind)
 	}
 	if len(w.Warnings) != 1 || w.Warnings[0] != "YELLOW WARNING - WIND" {
 		t.Errorf("warnings %q", w.Warnings)
@@ -57,6 +59,36 @@ func TestParseCitypage(t *testing.T) {
 	}
 	if p1.Name != "Tonight" || p1.POP != "" || p1.Temp != "-8" || p1.Class != "low" {
 		t.Errorf("period 1 %+v", p1)
+	}
+}
+
+// citypage_fr.xml is a real file from the datamart (2026-11-24 01:01 UTC).
+func TestParseCitypageFrench(t *testing.T) {
+	b, err := os.ReadFile("testdata/eccc/citypage_fr.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := ParseCitypage(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Location != "Toronto" || w.Station != "Aéroport int. Pearson de Toronto" ||
+		w.Condition != "Partiellement nuageux" || w.Temp != "2.4" || w.Tendency != "à la hausse" {
+		t.Errorf("current %+v", w)
+	}
+	// French text has no " at "; the time comes from the <hour>/<minute> fields.
+	if w.Observed != "20:00 HNE" {
+		t.Errorf("observed %q", w.Observed)
+	}
+	if w.Wind != (Wind{Direction: "ONO", Speed: "22", Gust: "36"}) {
+		t.Errorf("wind %+v", w.Wind)
+	}
+	if len(w.Forecast) != 12 || w.Forecast[0].Name != "Ce soir et cette nuit" ||
+		w.Forecast[0].Temp != "-4" || w.Forecast[0].Class != "low" {
+		t.Fatalf("forecast %d %+v", len(w.Forecast), w.Forecast[0])
+	}
+	if len(w.Warnings) != 0 {
+		t.Errorf("warnings %q", w.Warnings)
 	}
 }
 
@@ -101,11 +133,16 @@ type fakeDD struct {
 	legacy  bool
 	fail    bool
 	body    []byte
+	bodyFR  []byte
 	fetched []string
 }
 
 func newFakeDD(t *testing.T) *fakeDD {
-	f := &fakeDD{hour: "18", dated: true, body: fixture(t)}
+	fr, err := os.ReadFile("testdata/eccc/citypage_fr.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeDD{hour: "18", dated: true, body: fixture(t), bodyFR: fr}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -123,6 +160,8 @@ func newFakeDD(t *testing.T) *fakeDD {
 <a href="20261123T190000.333Z_MSC_CitypageWeather_s0000999_en.xml">x</a>`)
 		case f.dated && r.URL.Path == dir+"20261123T183000.222Z_MSC_CitypageWeather_s0000458_en.xml":
 			w.Write(f.body)
+		case f.dated && r.URL.Path == dir+"20261123T190000.333Z_MSC_CitypageWeather_s0000458_fr.xml":
+			w.Write(f.bodyFR)
 		case f.legacy && r.URL.Path == "/citypage_weather/xml/ON/s0000458_e.xml":
 			w.Write(f.body)
 		default:
@@ -175,7 +214,7 @@ func TestWeatherFindsNewestFile(t *testing.T) {
 	if !w.Refresh(context.Background(), torontoCfg) {
 		t.Fatal("first refresh should run")
 	}
-	st := w.Status()
+	st := w.Status(torontoCfg)
 	if st.Weather == nil || st.Weather.Location != "Toronto" || st.Stale || st.Err != "" {
 		t.Fatalf("status %+v", st)
 	}
@@ -185,13 +224,25 @@ func TestWeatherFindsNewestFile(t *testing.T) {
 	}
 }
 
+func TestWeatherFrenchFeed(t *testing.T) {
+	dd := newFakeDD(t)
+	clk := &fakeClock{t: time.Date(2026, 11, 23, 18, 20, 0, 0, time.UTC)}
+	w := newWeather(dd, clk)
+	fr := torontoCfg
+	fr.Lang = LangFR
+	w.Refresh(context.Background(), fr)
+	if st := w.Status(fr); st.Weather == nil || st.Weather.Condition != "Partiellement nuageux" {
+		t.Fatalf("status %+v", st)
+	}
+}
+
 func TestWeatherLegacyFallback(t *testing.T) {
 	dd := newFakeDD(t)
 	dd.dated, dd.legacy = false, true
 	clk := &fakeClock{t: time.Date(2026, 11, 23, 18, 0, 0, 0, time.UTC)}
 	w := newWeather(dd, clk)
 	w.Refresh(context.Background(), torontoCfg)
-	if st := w.Status(); st.Weather == nil || st.Err != "" {
+	if st := w.Status(torontoCfg); st.Weather == nil || st.Err != "" {
 		t.Fatalf("legacy fallback failed: %+v", st)
 	}
 }
@@ -215,7 +266,7 @@ func TestWeatherCacheAndStale(t *testing.T) {
 	if !w.Refresh(ctx, torontoCfg) {
 		t.Fatal("should refresh after the TTL")
 	}
-	st := w.Status()
+	st := w.Status(torontoCfg)
 	if st.Weather == nil || st.Weather.Temp != "-2.4" || !st.Stale || st.Err == "" {
 		t.Fatalf("after failure: %+v", st)
 	}
@@ -230,13 +281,13 @@ func TestWeatherCacheAndStale(t *testing.T) {
 	if !w.Refresh(ctx, torontoCfg) {
 		t.Fatal("no retry after a minute")
 	}
-	if st := w.Status(); st.Stale || st.Err != "" {
+	if st := w.Status(torontoCfg); st.Stale || st.Err != "" {
 		t.Fatalf("recovered: %+v", st)
 	}
 
 	// Data that hasn't refreshed for over an hour is stale even without an error.
 	clk.Add(61 * time.Minute)
-	if !w.Status().Stale {
+	if !w.Status(torontoCfg).Stale {
 		t.Fatal("old data not stale")
 	}
 }
@@ -252,7 +303,7 @@ func TestWeatherConfigChangeResetsCache(t *testing.T) {
 	if !w.Refresh(context.Background(), other) {
 		t.Fatal("new site should refresh at once")
 	}
-	if st := w.Status(); st.Weather != nil {
+	if st := w.Status(other); st.Weather != nil {
 		t.Fatal("old site's weather shown for the new site")
 	}
 	if w.Refresh(context.Background(), ECCCConfig{RefreshSeconds: 600}) {
