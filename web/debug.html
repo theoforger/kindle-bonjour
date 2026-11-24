@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kindle-bonjour: current frame</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 1rem; background: #eee; }
+  #frame { max-width: 100%; max-height: 90vh; border: 1px solid #888; background: #fff; cursor: crosshair; }
+  #status { margin: .5rem 0; color: #333; }
+  label { margin-left: 1rem; }
+</style>
+</head>
+<body>
+<div id="status">loading…</div>
+<img id="frame" alt="current frame">
+<div>
+  This is the panel exactly as the Kindle gets it (portrait, already rotated).
+  Click a tile to send the same tap the Kindle would.
+  <label><input type="checkbox" id="rotate"> show as held (turn by rotation)</label>
+</div>
+<script>
+const img = document.getElementById('frame');
+const status = document.getElementById('status');
+const PANEL_W = 1072, PANEL_H = 1448;
+let version = 0;
+let lastTap = '';
+
+function show(msg) { status.textContent = `version ${version}${lastTap ? ' · ' + lastTap : ''}${msg ? ' · ' + msg : ''}`; }
+
+async function loop() {
+  for (;;) {
+    try {
+      const r = await fetch(`/frame.png?debug=1&v=${version}`, { cache: 'no-store' });
+      if (r.status === 200) {
+        version = r.headers.get('X-Version');
+        const url = URL.createObjectURL(await r.blob());
+        const old = img.src;
+        img.src = url;
+        if (old) URL.revokeObjectURL(old);
+        show();
+      } else if (r.status !== 204) {
+        show(`HTTP ${r.status}`);
+        await new Promise(ok => setTimeout(ok, 3000));
+      }
+    } catch (e) {
+      show('offline');
+      await new Promise(ok => setTimeout(ok, 3000));
+    }
+  }
+}
+
+img.addEventListener('click', async ev => {
+  // offsetX/Y are in the image's own (untransformed) coordinates.
+  const x = Math.round(ev.offsetX * PANEL_W / img.clientWidth);
+  const y = Math.round(ev.offsetY * PANEL_H / img.clientHeight);
+  try {
+    const r = await fetch(`/api/tap?x=${x}&y=${y}&v=${version}`, { method: 'POST' });
+    const j = await r.json();
+    lastTap = `tap (${x}, ${y}): ${j.hit ? j.id : (j.error || 'no tile')}`;
+  } catch (e) {
+    lastTap = `tap failed: ${e}`;
+  }
+  show();
+});
+
+document.getElementById('rotate').addEventListener('change', async ev => {
+  if (!ev.target.checked) { img.style.transform = ''; return; }
+  // Undo the panel rotation so the frame reads the way the Kindle is held.
+  // Clicks still work: the browser maps them back through the transform.
+  const r = await fetch('/api/state?v=0').then(r => r.json());
+  const turn = { 0: -90, 90: 0, 180: 90, 270: 180 }[r.snapshot.display.rotation] || 0;
+  img.style.transform = `rotate(${turn}deg)`;
+});
+
+loop();
+</script>
+</body>
+</html>

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"sort"
 	"sync"
 	"time"
 )
@@ -23,6 +24,7 @@ type Snapshot struct {
 	Clock          string        `json:"clock,omitempty"`           // localized time, empty when the clock is off
 	Date           string        `json:"date,omitempty"`
 	Display        DisplayConfig `json:"display"`
+	Pending        []string      `json:"pending,omitempty"` // tapped tiles waiting for HA (dotted border)
 }
 
 // Hub holds the current snapshot and its version, and wakes long-polls.
@@ -107,11 +109,33 @@ type App struct {
 	haErr   error
 	haOKAt  time.Time
 	afterOp time.Duration // delay before the re-read after a toggle
+
+	// Pending taps. pubMu makes "build snapshot + publish" atomic, so a
+	// tap's quick republish and a slower Refresh never overtake each other.
+	pubMu   sync.Mutex
+	last    Snapshot // last refreshed snapshot, without Pending
+	hasLast bool
+	pending map[string]*pendingTap
 }
+
+// pendingTap is a tile that was tapped and hasn't been confirmed by HA yet.
+type pendingTap struct {
+	since  time.Time
+	prev   string    // HA state when tapped
+	doneAt time.Time // when HA accepted the call; zero while in flight
+}
+
+// How long a tile stays pending: until HA reports a new state, or this
+// long after HA accepted the call, or at most pendingMax after the tap.
+const (
+	pendingAfterDone = 3 * time.Second
+	pendingMax       = 10 * time.Second
+)
 
 func NewApp(cfg *ConfigStore, w *WeatherService, icons *IconCache) *App {
 	a := &App{Config: cfg, Weather: w, Icons: icons, Hub: NewHub(time.Now()), Now: time.Now,
-		HAPoll: 3 * time.Second, trigger: make(chan struct{}, 1), afterOp: 700 * time.Millisecond}
+		HAPoll: 3 * time.Second, trigger: make(chan struct{}, 1), afterOp: 700 * time.Millisecond,
+		pending: map[string]*pendingTap{}}
 	cfg.OnChange(func() { a.Weather.Wake(); a.Trigger() })
 	return a
 }
@@ -161,7 +185,51 @@ func (a *App) Refresh(ctx context.Context) uint64 {
 		s.Clock = formatClock(lang, now)
 		s.Date = formatDate(lang, now)
 	}
+	return a.publish(s, true)
+}
+
+// publish adds the pending taps to s and publishes it. fresh means s has
+// new HA states, so confirmed or expired taps are cleared first.
+func (a *App) publish(s Snapshot, fresh bool) uint64 {
+	a.pubMu.Lock()
+	defer a.pubMu.Unlock()
+	now := a.Now()
+	a.mu.Lock()
+	states := map[string]SwitchState{}
+	for _, sw := range s.Switches {
+		states[sw.ID] = sw
+	}
+	s.Pending = nil
+	for id, p := range a.pending {
+		sw, listed := states[id]
+		switch {
+		case !listed, now.Sub(p.since) > pendingMax:
+			delete(a.pending, id)
+			continue
+		case fresh && !p.doneAt.IsZero() && (sw.Action || sw.State != p.prev || now.Sub(p.doneAt) > pendingAfterDone):
+			delete(a.pending, id)
+			continue
+		}
+		s.Pending = append(s.Pending, id)
+	}
+	a.mu.Unlock()
+	sort.Strings(s.Pending)
+	if fresh {
+		s0 := s
+		s0.Pending = nil
+		a.last, a.hasLast = s0, true
+	}
 	return a.Hub.Publish(s)
+}
+
+// republish publishes the last snapshot again with the current pending set.
+func (a *App) republish() {
+	a.pubMu.Lock()
+	s, ok := a.last, a.hasLast
+	a.pubMu.Unlock()
+	if ok {
+		a.publish(s, false)
+	}
 }
 
 // Run refreshes on every HA poll tick, on triggers and at each minute
@@ -190,14 +258,7 @@ func (a *App) Run(ctx context.Context) {
 // without contacting HA.
 func (a *App) Toggle(ctx context.Context, id string) error {
 	cfg := a.Config.Get()
-	found := false
-	for _, e := range cfg.Entities {
-		if e.ID == id {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !hasEntity(cfg, id) {
 		return ErrUnknownEntity
 	}
 	if cfg.SetupMode() {
@@ -210,6 +271,64 @@ func (a *App) Toggle(ctx context.Context, id string) error {
 	// HA often reports the new state a moment later; read again then.
 	time.AfterFunc(a.afterOp, a.Trigger)
 	return nil
+}
+
+// Tap marks a configured entity pending, shows that at once, and toggles
+// it in the background. Errors are those of Toggle that can be known
+// before contacting HA.
+func (a *App) Tap(id string) error {
+	cfg := a.Config.Get()
+	if !hasEntity(cfg, id) {
+		return ErrUnknownEntity
+	}
+	if cfg.SetupMode() {
+		return ErrSetupMode
+	}
+	a.pubMu.Lock()
+	prev := ""
+	for _, sw := range a.last.Switches {
+		if sw.ID == id {
+			prev = sw.State
+		}
+	}
+	a.pubMu.Unlock()
+	a.mu.Lock()
+	if p, ok := a.pending[id]; ok && p.doneAt.IsZero() {
+		a.mu.Unlock()
+		return nil // the first tap is still in flight; ignore the repeat
+	}
+	a.pending[id] = &pendingTap{since: a.Now(), prev: prev}
+	a.mu.Unlock()
+	a.republish()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err := a.Toggle(ctx, id)
+		a.mu.Lock()
+		if p, ok := a.pending[id]; ok {
+			if err != nil {
+				delete(a.pending, id)
+			} else {
+				p.doneAt = a.Now()
+			}
+		}
+		a.mu.Unlock()
+		if err != nil {
+			log.Printf("tap %s: %v", id, err)
+			a.republish()
+		}
+	}()
+	return nil
+}
+
+func hasEntity(cfg Config, id string) bool {
+	for _, e := range cfg.Entities {
+		if e.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // HAStatus reports the last HA error and the last successful read.

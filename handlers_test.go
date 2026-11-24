@@ -38,7 +38,7 @@ func newEnv(t *testing.T) *testEnv {
 	e.app = NewApp(store, newWeather(e.dd, e.clk), NewIconCache(filepath.Join(dir, "icons")))
 	e.app.Now = e.clk.Now
 	e.app.afterOp = time.Hour // tests refresh by hand
-	e.srv = httptest.NewServer((&Server{App: e.app, PollTimeout: 300 * time.Millisecond}).Handler())
+	e.srv = httptest.NewServer((&Server{App: e.app, PollTimeout: 300 * time.Millisecond, Renderer: NewRenderer(testIcon)}).Handler())
 	t.Cleanup(e.srv.Close)
 	return e
 }

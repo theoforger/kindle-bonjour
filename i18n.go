@@ -29,6 +29,9 @@ var messages = map[string]map[string]string{
 	"wind_calm":       {LangEN: "calm", LangFR: "calme"},
 	"wind_gust":       {LangEN: "gust %s", LangFR: "rafales %s"},
 	"pop":             {LangEN: "%s%%", LangFR: "%s %%"},
+	"temp_high":       {LangEN: "High %s°", LangFR: "Max %s°"},
+	"temp_low":        {LangEN: "Low %s°", LangFR: "Min %s°"},
+	"no_switches":     {LangEN: "No switches configured", LangFR: "Aucun interrupteur configuré"},
 
 	// Errors and setup.
 	"ha_unreachable":    {LangEN: "Home Assistant unreachable", LangFR: "Home Assistant injoignable"},

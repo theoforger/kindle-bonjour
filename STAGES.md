@@ -73,23 +73,41 @@ This breaks the build order in `PLAN.md` §7 into stages. The design is **server
 **Goal:** Full loop: frame on the panel → tap → toggle → new frame.
 
 Server:
-- [ ] `layout.go`: computes the landscape canvas (1448×1072), the tile grid, the weather pane and the header. It returns tile rectangles.
-- [ ] `render.go`: draws with `x/image/font/opentype` and the Go fonts, scales ECCC icons, rotates into the 1072×1448 panel frame and encodes a grayscale PNG.
-- [ ] `/frame.png?v=N` (sets `X-Version`, and `X-Refresh: full` when the flash interval is due) and `POST /api/tap?x=&y=&v=` (inverse rotation, hit test against version `v`, pending dotted border, toggle).
-- [ ] All frame text goes through `T(snapshot.Language, key)` in `i18n.go`, and nothing in `render.go` is hard-coded in English. Check that the longest French strings (`ÉTEINT`, `LANCER`, the long forecast names like "Ce soir et cette nuit") fit their boxes. Golden images in both languages.
-- [ ] `GET /` debug page.
-- [ ] Tests: golden-image tests for each rotation, and tap matching at all 4 rotations.
+- [x] `layout.go`: computes the canvas (1448×1072 landscape, 1072×1448 portrait), the tile grid, the weather pane and the header. It returns tile rectangles.
+- [x] `render.go`: draws with `x/image/font/opentype` and the Go fonts, scales ECCC icons, rotates into the 1072×1448 panel frame and encodes a grayscale PNG.
+- [x] `/frame.png?v=N` (sets `X-Version`, and `X-Refresh: full` when the flash interval is due) and `POST /api/tap?x=&y=&v=` (inverse rotation, hit test against version `v`, pending dotted border, toggle).
+- [x] All frame text goes through `T(snapshot.Language, key)` in `i18n.go`, and nothing in `render.go` is hard-coded in English. Check that the longest French strings (`ÉTEINT`, `LANCER`, the long forecast names like "Ce soir et cette nuit") fit their boxes. Golden images in both languages.
+- [x] `GET /` debug page.
+- [x] Tests: golden-image tests for each rotation, and tap matching at all 4 rotations.
 
 Kindle (`kindle/ha-dash/`):
-- [ ] `frames.sh`: long-poll loop, `fbink` drawing, full flash on request, offline back-off and marker, Wi-Fi re-enable. The offline marker can't ask the server for text, so it uses a symbol that needs no language (or the agent keeps the last `X-Language` header in a file).
-- [ ] The exit gesture's on-screen confirmation (if any) follows the same rule.
-- [ ] `touch.sh`: `od | awk` event decoder, calibration mapping, `POST /api/tap` when a finger lifts, exit gesture (long press of 3 s or more, top-left).
-- [ ] `start.sh` and `stop.sh`: stop and start the interface, `preventScreenSaver`, keep-alive, PID handling. Nothing starts at boot.
-- [ ] **Self-healing** (for the freezes the user has seen after hours or days):
+- [x] `frames.sh`: long-poll loop, `fbink` drawing, full flash on request, offline back-off and marker, Wi-Fi re-enable. The offline marker can't ask the server for text, so it uses a symbol that needs no language (or the agent keeps the last `X-Language` header in a file).
+- [x] The exit gesture's on-screen confirmation (if any) follows the same rule.
+- [x] `touch.sh`: `od | awk` event decoder, calibration mapping, `POST /api/tap` when a finger lifts, exit gesture (long press of 3 s or more; any corner, see the notes).
+- [x] `start.sh` and `stop.sh`: stop and start the interface, `preventScreenSaver`, keep-alive, PID handling. Nothing starts at boot.
+- [x] **Self-healing** (for the freezes the user has seen after hours or days):
   - a supervisor restarts `frames.sh` or `touch.sh` if either dies;
   - escalating recovery when there's no successful poll: after about 2 min, cycle Wi-Fi (`wirelessEnable 0` then `1`); after about 10 min, restart the agent; reboot after about 30 min is optional and depends on the boot decision in Stage 6.
-- [ ] **Heartbeat logging** that survives a reboot: one line a minute to `/mnt/us/ha-dash.log` (uptime, Wi-Fi, poll age, free memory, load), rotated at about 1 MB, so the moment a freeze happens is captured.
-- [ ] **The server tracks "Kindle last seen"** from polls and shows it in `/healthz` and the settings page.
+- [x] **Heartbeat logging** that survives a reboot: one line a minute to `/mnt/us/ha-dash.log` (uptime, Wi-Fi, poll age, free memory, load), rotated at about 1 MB, so the moment a freeze happens is captured.
+- [x] **The server tracks "Kindle last seen"** from polls and shows it in `/healthz` and the settings page. (`/healthz` done; the settings page is Stage 3.)
+- [ ] **On-device run** (the exit criteria below). Everything above is tested in simulation only.
+
+**Notes (2026-11-23, server and agent written, not yet run on the Kindle):**
+- **Rotation** means how the Kindle is held, clockwise from the default landscape: 0 = landscape, USB port on the right; 90 = portrait upright; 180 = landscape, USB port on the left; 270 = portrait upside down. Portrait gets its own layout (switches on top, weather below, about 3 forecast periods). The Stage 3 settings page should name these positions, not show degrees.
+- **Frames:** each version is rendered once and the last 32 are kept with their layouts, so `/api/tap?v=` is matched against the frame the Kindle showed, even across a rotation change. An unknown version gives `409`, and a tap outside any tile gives `200 {"hit":false}`. Tiles have a 10 px tap slop into the gaps.
+- **Pending border:** `/api/tap` publishes a new version with the tile pending *before* it returns, then toggles in the background. The border clears when HA reports a new state (scenes and scripts clear as soon as HA accepts the call), 3 s after HA accepted the call with no change, at most 10 s after the tap, or at once if HA rejects it. A repeated tap while the first is in flight is ignored.
+- **Flash:** `X-Refresh: full` on the first frame after the agent starts (`v=0`), then on the first frame after each `flash_minutes`. `/frame.png?debug=1` (the debug page) doesn't count as the Kindle and doesn't use up the flash.
+- **`X-Language`** is sent with each frame; the agent keeps it for its own messages (offline note, exit confirmation), in ASCII because FBInk's built-in font has no accents.
+- **Debug page** `GET /`: the live frame (long-polls with `debug=1`); clicking it sends the same `/api/tap` the Kindle would. Optional view turned the way the Kindle is held.
+- **Text fitting:** sizes shrink to fit, then text is cut with "…". A test fails if any tile name, tile state, forecast name, header or banner is cut, in either language, at 2 or 3 columns, landscape or portrait. Only forecast summaries and detail lines may be cut.
+- **Icons** are converted to gray and darkened (ECCC's are pale yellow and blue). Golden tests use a stand-in icon so they don't need the network.
+- **Golden images:** `testdata/golden/`; `go test -run Golden -update` rewrites them after an intended change.
+- **`touch.sh` buffering fix:** a loop of `dd bs=1536 count=1 | od -An -v -td4 -w16` feeds `awk`. Each `dd` makes one `read(2)`, which returns every event queued so far, and `od` exits and flushes after each batch. Positions are kept between touches (the kernel only sends changes); the touch-down position after the first `SYN` is the tap point.
+- **Exit gesture:** hold **any** corner (150 px) for 3 s, then lift. Any corner because the agent doesn't know the rotation; long presses never toggle tiles, so there's no conflict. It runs `stop.sh exit`, which shows "Returning to the Kindle…" and restarts the UI.
+- **Agent layout:** `start.sh` (KUAL) → `agent.sh` (supervisor, own session) → `frames.sh` and `touch.sh` (own process groups, so killing one takes its whole pipeline). Scripts are always run with `sh`, since `/mnt/us` is FAT and exec bits can't be trusted. Settings and thresholds are in `bin/common.sh`; per-device overrides go in `config.sh` next to `url.txt`. `keepawake.sh` is replaced by the supervisor.
+- **Recovery:** the supervisor checks every 10 s. If there's no good poll (`200` or `204`) for 2 min it cycles Wi-Fi, after 10 min it restarts `frames.sh` and `touch.sh`, and it reboots after `REBOOT_AFTER` seconds (`0` = never; the default until Stage 6).
+- **Tested in simulation** with stubbed `fbink`, `lipc-*`, `start`/`stop`, a FIFO playing binary `input_event`s as `/dev/input/event1`, the real server and `mock_ha.py`. Taps toggled the right entity, with pending then confirmed frames. Long presses and drags sent nothing. A killed `touch.sh` was restarted within 10 s. A server outage showed the offline note after 3 failures and recovered with a full flash. The exit gesture stopped everything and restarted the UI. **Not yet checked on the device:** busybox `ash`/`awk`/`od` behaviour, `setsid` availability (there's a fallback), image orientation and alignment under FBInk, how readable the text is on the panel, and the real event timing.
+- **Go version:** the server targets the latest Go (`go 1.27.4` in `go.mod`); `golang.org/x/image` also pulls in `x/text` and `x/sys`. Only the server is written in Go, and it runs in Docker, so the Kindle's old kernel doesn't limit it. The Stage 4 Dockerfile should use a `golang:1.27.4-alpine` (or newer) build stage.
 
 **Exit:** On the real Kindle, a tap on each tile at every rotation toggles the right entity in the mock HA. The pending border appears in under 1 s. The exit gesture restores the Kindle interface. The text is clear and readable on the panel.
 

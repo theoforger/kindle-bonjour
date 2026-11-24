@@ -31,7 +31,7 @@ A fullscreen, always-on **landscape** dashboard on a jailbroken Kindle Paperwhit
 **Weather:** The server finds the newest file under `https://dd.weather.gc.ca/today/citypage_weather/{PROV}/{HH}/` (trying the current and previous 3 UTC hours). It falls back to `/citypage_weather/xml/{PROV}/{site}_e.xml`, caches for 10 minutes, and draws the last good data marked "(old)" if a refresh fails. Parsing ignores unknown elements, because ECCC has been changing this feed through 2026. ECCC icons (GIF) are fetched once, cached in `/data`, then decoded and scaled into the frame.
 
 ## 3. The frame (server-side drawing)
-- **Canvas:** a landscape layout at 1448×1072, rotated by 0/90/180/270 into the 1072×1448 panel frame. Rotation comes from settings. Landscape is the default.
+- **Canvas:** drawn at the size the user sees, then turned into the 1072×1448 panel frame. Rotation (from settings) is how the Kindle is held, clockwise from the default landscape: 0 = landscape with the USB port on the right (default), 90 = portrait upright, 180 = landscape with the USB port on the left, 270 = portrait upside down. Landscape canvases are 1448×1072 with switches left and weather right; portrait canvases are 1072×1448 with switches on top and weather below (fewer forecast periods fit).
 - **Left pane:** switch tiles in a grid, with a configurable number of columns. Tiles show ON (filled black, white text), OFF (outlined), N/A (gray) or RUN (scenes, scripts and buttons). A dotted border marks a pending tap.
 - **Right pane:** current conditions with an icon, a warning banner and 6 forecast periods.
 - **Header:** clock (server time, minute resolution) and a small "last update" or "(old)" marker.
@@ -43,14 +43,15 @@ A fullscreen, always-on **landscape** dashboard on a jailbroken Kindle Paperwhit
 ## 4. Kindle agent (KUAL extension)
 `kindle/ha-dash/`:
 - `url.txt`: the server address.
-- `bin/start.sh`:
-  - stops the Kindle interface (`stop lab126_gui`) and turns on `preventScreenSaver`;
-  - starts `frames.sh` and `touch.sh`, logging to `/tmp/ha-dash.log`.
+- `bin/start.sh` (KUAL): starts `bin/agent.sh` in its own session and returns.
+- `bin/agent.sh` (supervisor): stops the Kindle interface (`stop lab126_gui`), keeps `preventScreenSaver` on, runs `frames.sh` and `touch.sh` (each in its own process group) and restarts them if they die, runs the escalating recovery, and writes the heartbeat log. Logs go to `/tmp/ha-dash.log`.
+- `bin/common.sh`: shared settings; per-device overrides go in `config.sh` next to `url.txt`.
 - `bin/frames.sh`: loops on `GET /frame.png?v=N` (with curl, or busybox `wget` if curl is missing). It draws each frame with `fbink -g file=…`, using a flashing full refresh (`-f`) when the server sends `X-Refresh: full`. If the request fails it backs off and draws an "offline" note in a corner.
-- `bin/touch.sh`: reads the touchscreen's `/dev/input/eventN` through `od | awk`. It decodes multitouch slot and position events, turns them into panel coordinates using the calibration from Stage 0, and sends `POST /api/tap` when a finger lifts. It also catches the **exit gesture**, a long press (3 s or more) in the top-left corner, and runs `stop.sh`. While the Kindle interface is stopped, KUAL can't be reached, so this gesture is the only way out without SSH.
+- `bin/touch.sh`: reads `/dev/input/event1` with a `dd bs=1536 count=1 | od` loop (one `read(2)` per batch, so `od` exits and flushes; a long-running `od` buffers taps) into `awk`. Touch coordinates are panel pixels (Stage 0), so no mapping is needed. On lift it sends `POST /api/tap` with the touch-down position, unless the press lasted over 1.5 s, moved over 60 px or used a second finger. It also catches the **exit gesture**: hold any screen corner (within 150 px) for 3 s or more, then lift. Any corner, because the agent doesn't know the rotation, and a long press never toggles anything. While the Kindle interface is stopped, KUAL can't be reached, so this gesture is the only way out without SSH.
 - `bin/stop.sh`: kills the agent, turns `preventScreenSaver` off and restarts the interface (`start lab126_gui`).
 - `bin/fbink`: a static FBInk build, bundled if the device doesn't already have one.
-- **Wi-Fi:** `frames.sh` re-enables Wi-Fi (`lipc-set-prop com.lab126.cmd wirelessEnable 1`) after repeated failures.
+- **Wi-Fi:** `frames.sh` re-enables Wi-Fi (`lipc-set-prop com.lab126.cmd wirelessEnable 1`) after repeated failures; `agent.sh` cycles it off and on after 2 min without a good poll and restarts `frames.sh`/`touch.sh` after 10 min. Rebooting is off (`REBOOT_AFTER=0`) until Stage 6 decides on starting at boot.
+- **Agent messages** (offline note, exit confirmation) use the language from the last `X-Language` header, in ASCII because FBInk's built-in font has no accents.
 - **Nothing starts at boot** until the soak test passes, so a reboot always brings back the normal Kindle.
 
 ## 5. Settings page
