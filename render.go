@@ -86,7 +86,7 @@ func (r *Renderer) Render(s Snapshot, host string) (*image.Gray, Layout) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	l := ComputeLayout(s)
-	c := &canvas{r: r, img: image.NewGray(image.Rect(0, 0, l.W, l.H)), lang: s.Language}
+	c := &canvas{r: r, img: image.NewGray(image.Rect(0, 0, l.W, l.H)), lang: s.Language, sc: s.Display.Scale.Norm()}
 	c.fill(c.img.Bounds(), white)
 	if s.Setup {
 		c.drawSetup(host)
@@ -127,6 +127,7 @@ type canvas struct {
 	r    *Renderer
 	img  *image.Gray
 	lang string
+	sc   Scale // per-section scale, normalized
 }
 
 func (c *canvas) face(bold bool, size int) font.Face { return c.r.face(bold, size) }
@@ -284,25 +285,26 @@ func (c *canvas) drawSetup(host string) {
 }
 
 func (c *canvas) drawHeader(s Snapshot, r image.Rectangle) {
+	k := func(v int) int { return scaled(v, c.sc.Header) }
 	mid := r.Min.Y + r.Dy()/2
 	x := r.Min.X + margin
 	if s.Clock != "" {
-		x += c.textMid(c.face(true, 60), x, mid, s.Clock, black) + 28
+		x += c.textMid(c.face(true, k(60)), x, mid, s.Clock, black) + k(28)
 		if s.Date != "" {
-			c.textMid(c.face(false, 36), x, mid, s.Date, black)
+			c.textMid(c.face(false, k(36)), x, mid, s.Date, black)
 		}
 	}
 	right := r.Max.X - margin
 	if s.WeatherStale {
-		f := c.face(true, 30)
+		f := c.face(true, k(30))
 		old := T(c.lang, "weather_old")
-		box := image.Rect(right-width(f, old)-24, mid-24, right, mid+24)
+		box := image.Rect(right-width(f, old)-k(24), mid-k(24), right, mid+k(24))
 		c.fill(box, black)
-		c.textMid(f, box.Min.X+12, mid, old, white)
-		right = box.Min.X - 16
+		c.textMid(f, box.Min.X+k(12), mid, old, white)
+		right = box.Min.X - k(16)
 	}
 	if s.WeatherUpdated != "" {
-		f := c.face(false, 28)
+		f := c.face(false, k(28))
 		t := T(c.lang, "weather_updated", s.WeatherUpdated)
 		c.textMid(f, right-width(f, t), mid, t, black)
 	}
@@ -310,15 +312,16 @@ func (c *canvas) drawHeader(s Snapshot, r image.Rectangle) {
 }
 
 func (c *canvas) drawSwitches(s Snapshot, l Layout) {
+	k := func(v int) int { return scaled(v, c.sc.Switches) }
 	if !l.Banner.Empty() {
 		b := l.Banner
 		c.fill(b, black)
-		f, t := c.fit(true, 32, 22, T(c.lang, s.HAError), b.Dx()-40, "banner")
+		f, t := c.fit(true, k(32), k(22), T(c.lang, s.HAError), b.Dx()-40, "banner")
 		c.textMid(f, b.Min.X+20, b.Min.Y+b.Dy()/2, t, white)
 	}
 	if len(s.Switches) == 0 {
 		p := l.Switches
-		f, t := c.fit(true, 36, 24, T(c.lang, "no_switches"), p.Dx(), "no_switches")
+		f, t := c.fit(true, k(36), k(24), T(c.lang, "no_switches"), p.Dx(), "no_switches")
 		c.textCentered(f, p.Min.X, p.Max.X, p.Min.Y+p.Dy()/2, t, black)
 		return
 	}
@@ -334,6 +337,7 @@ func (c *canvas) drawSwitches(s Snapshot, l Layout) {
 func clamp(v, lo, hi int) int { return max(lo, min(v, hi)) }
 
 func (c *canvas) drawTile(sw SwitchState, r image.Rectangle, pending bool) {
+	k := func(v int) int { return scaled(v, c.sc.Switches) }
 	var bg, fg uint8 = white, black
 	state := T(c.lang, "tile_off")
 	pill := false
@@ -353,9 +357,12 @@ func (c *canvas) drawTile(sw SwitchState, r image.Rectangle, pending bool) {
 	inner := r.Inset(pad)
 	pillPad := 0
 	if pill {
-		pillPad = 14
+		pillPad = k(14)
 	}
-	sf, st := c.fit(true, clamp(r.Dy()*22/100, 20, 44), 18, state, inner.Dx()-2*pillPad, "tile_state")
+	// The state may take at most a third of the tile, so a large scale on
+	// a crowded grid still leaves room for the name.
+	stateHi := min(k(clamp(r.Dy()*22/100, 20, 44)), max(r.Dy()/3, 18))
+	sf, st := c.fit(true, stateHi, min(k(18), stateHi), state, inner.Dx()-2*pillPad, "tile_state")
 	base := inner.Max.Y - descent(sf)
 	if pill {
 		box := image.Rect(inner.Min.X, base-ascent(sf)-6, inner.Min.X+width(sf, st)+2*pillPad, inner.Max.Y+4)
@@ -365,7 +372,7 @@ func (c *canvas) drawTile(sw SwitchState, r image.Rectangle, pending bool) {
 		c.text(sf, inner.Min.X, base, st, fg)
 	}
 	area := image.Rect(inner.Min.X, inner.Min.Y, inner.Max.X, base-ascent(sf)-10)
-	nf, lines := c.fitWrapped(true, clamp(r.Dy()*24/100, 20, 48), 18, sw.Name, area.Dx(), 2, area.Dy(), "tile_name")
+	nf, lines := c.fitWrapped(true, k(clamp(r.Dy()*24/100, 20, 48)), k(18), sw.Name, area.Dx(), 2, area.Dy(), "tile_name")
 	y := area.Min.Y + ascent(nf)
 	for _, ln := range lines {
 		c.text(nf, area.Min.X, y, ln, fg)
@@ -387,36 +394,38 @@ func roundTemp(s string) string {
 }
 
 func (c *canvas) drawWeather(w *Weather, r image.Rectangle) {
+	k := func(v int) int { return scaled(v, c.sc.Weather) }
 	if w == nil {
-		f := c.face(true, 36)
+		f := c.face(true, k(36))
 		c.textCentered(f, r.Min.X, r.Max.X, r.Min.Y+r.Dy()/2, T(c.lang, "weather_none"), black)
 		return
 	}
 	y := r.Min.Y
-	f, t := c.fit(true, 40, 28, w.Location, r.Dx(), "location")
+	f, t := c.fit(true, k(40), k(28), w.Location, r.Dx(), "location")
 	y += ascent(f)
 	c.text(f, r.Min.X, y, t, black)
-	y += descent(f) + 14
+	y += descent(f) + k(14)
 
 	for i, warn := range w.Warnings {
 		if i == 2 {
 			break
 		}
-		box := image.Rect(r.Min.X, y, r.Max.X, y+52)
+		bh := k(52)
+		box := image.Rect(r.Min.X, y, r.Max.X, y+bh)
 		c.fill(box, black)
-		wf, wt := c.fit(true, 28, 20, warn, box.Dx()-32, "warning")
-		c.textMid(wf, box.Min.X+16, box.Min.Y+26, wt, white)
-		y += 52 + 12
+		wf, wt := c.fit(true, k(28), k(20), warn, box.Dx()-32, "warning")
+		c.textMid(wf, box.Min.X+16, box.Min.Y+bh/2, wt, white)
+		y += bh + 12
 	}
 
 	// Current conditions: icon and big temperature, then the details,
 	// beside them when the pane is wide (portrait) and below otherwise.
-	const curH = 150
-	c.icon(w.Icon, image.Rect(r.Min.X, y, r.Min.X+170, y+curH))
-	tx := r.Min.X + 190
+	curH := k(150)
+	c.icon(w.Icon, image.Rect(r.Min.X, y, r.Min.X+k(170), y+curH))
+	tx := r.Min.X + k(190)
 	if w.Temp != "" {
-		tf := c.face(true, 120)
-		tx += c.text(tf, tx, y+curH/2+(ascent(tf)-descent(tf))/2-6, roundTemp(w.Temp)+"°", black) + 32
+		tf := c.face(true, k(120))
+		tx += c.text(tf, tx, y+curH/2+(ascent(tf)-descent(tf))/2-k(6), roundTemp(w.Temp)+"°", black) + k(32)
 	}
 	var feels, hp []string
 	if w.Feels != "" {
@@ -436,12 +445,12 @@ func (c *canvas) drawWeather(w *Weather, r image.Rectangle) {
 	// Narrow pane (landscape): below it, paired up.
 	dx, dw, dy := r.Min.X, r.Dx(), y+curH+8
 	details := []string{strings.Join(feels, sep), strings.Join(hp, sep)}
-	if r.Max.X-tx >= 420 {
+	if r.Max.X-tx >= k(420) {
 		dx, dw, dy = tx, r.Max.X-tx, y+4
 		details = append(feels, details[1])
 	}
 	if w.Condition != "" {
-		cf, ct := c.fit(true, 34, 24, w.Condition, dw, "condition")
+		cf, ct := c.fit(true, k(34), k(24), w.Condition, dw, "condition")
 		dy += ascent(cf)
 		c.text(cf, dx, dy, ct, black)
 		dy += descent(cf) + 8
@@ -450,13 +459,13 @@ func (c *canvas) drawWeather(w *Weather, r image.Rectangle) {
 		if d == "" {
 			continue
 		}
-		df, dt := c.fit(false, 28, 20, d, dw, "detail")
+		df, dt := c.fit(false, k(28), k(20), d, dw, "detail")
 		dy += ascent(df)
 		c.text(df, dx, dy, dt, black)
 		dy += descent(df) + 6
 	}
 	if w.Observed != "" {
-		of, ot := c.fit(false, 24, 18, T(c.lang, "observed_at", localTime(c.lang, w.Observed)), dw, "observed")
+		of, ot := c.fit(false, k(24), k(18), T(c.lang, "observed_at", localTime(c.lang, w.Observed)), dw, "observed")
 		dy += ascent(of)
 		c.text(of, dx, dy, ot, black)
 		dy += descent(of)
@@ -467,12 +476,12 @@ func (c *canvas) drawWeather(w *Weather, r image.Rectangle) {
 	c.fill(image.Rect(r.Min.X, y, r.Max.X, y+3), black)
 	y += 3 + 6
 	avail := r.Max.Y - y
-	const minRow = 84
+	minRow := scaled(84, c.sc.Forecast)
 	n := min(6, len(w.Forecast), avail/minRow)
 	if n <= 0 {
 		return
 	}
-	rowH := min(avail/n, 130)
+	rowH := min(avail/n, scaled(130, c.sc.Forecast))
 	for i := 0; i < n; i++ {
 		c.drawPeriod(w.Forecast[i], image.Rect(r.Min.X, y, r.Max.X, y+rowH))
 		y += rowH
@@ -480,10 +489,11 @@ func (c *canvas) drawWeather(w *Weather, r image.Rectangle) {
 }
 
 func (c *canvas) drawPeriod(p Period, r image.Rectangle) {
-	ic := min(r.Dy()-12, 90)
+	k := func(v int) int { return scaled(v, c.sc.Forecast) }
+	ic := min(r.Dy()-12, k(90))
 	c.icon(p.Icon, image.Rect(r.Min.X, r.Min.Y+(r.Dy()-ic)/2, r.Min.X+ic, r.Min.Y+(r.Dy()+ic)/2))
 	x := r.Min.X + ic + 16
-	size := clamp(r.Dy()*32/100, 22, 32)
+	size := clamp(r.Dy()*32/100, k(22), k(32))
 	b1 := r.Min.Y + r.Dy()*44/100
 	b2 := r.Min.Y + r.Dy()*84/100
 
@@ -506,9 +516,10 @@ func (c *canvas) drawPeriod(p Period, r image.Rectangle) {
 		c.text(pf, right, b1, t, black)
 		right -= 20
 	}
-	nf, name := c.fit(true, size, 20, p.Name, right-x, "period")
+	nf, name := c.fit(true, size, min(k(20), size), p.Name, right-x, "period")
 	c.text(nf, x, b1, name, black)
-	sf, sum := c.fit(false, clamp(r.Dy()*28/100, 20, 28), 20, p.Summary, r.Max.X-x, "summary")
+	sumSize := clamp(r.Dy()*28/100, k(20), k(28))
+	sf, sum := c.fit(false, sumSize, min(k(20), sumSize), p.Summary, r.Max.X-x, "summary")
 	c.text(sf, x, b2, sum, black)
 }
 

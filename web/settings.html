@@ -15,6 +15,7 @@
   @media (min-width: 900px) { main { grid-template-columns: minmax(0, 1fr) 380px; } #preview-card { grid-column: 2; grid-row: 1 / span 5; align-self: start; position: sticky; top: 1rem; } }
   section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; }
   h2 { font-size: 1rem; margin: 0 0 .8rem; }
+  h3 { font-size: .95rem; margin: 1.2rem 0 0; }
   label { display: block; font-size: .9rem; margin: .6rem 0 .25rem; color: #333; }
   input[type=text], input[type=url], input[type=password], input[type=search], input[type=number], select {
     width: 100%; font: inherit; padding: .5rem .6rem; border: 1px solid #bbb; border-radius: 6px; background: #fff; }
@@ -126,6 +127,10 @@
         <label class="check"><input type="checkbox" id="ds-clock"> <span data-t="ds_clock">Show the time and date</span></label>
       </div>
     </div>
+    <h3 data-t="sc_title">Size of each section</h3>
+    <p class="hint" data-t="sc_hint">Text and icons in that part of the screen. 100 % is the normal size; text that no longer fits is shrunk or cut.</p>
+    <div class="grid2" id="scales"></div>
+    <button type="button" id="sc-reset" data-t="sc_reset">Reset sizes to 100 %</button>
   </section>
 
   <section id="preview-card">
@@ -164,6 +169,9 @@ const STR = {
     ds_title: 'Display', ds_rotation: 'How the Kindle is held', ds_split: "Switches' share of the screen",
     ds_columns: 'Tile columns', ds_flash: 'Full refresh every (minutes)', ds_flash_hint: 'Clears ghosting with a flash. 0 = never.',
     ds_clock_label: 'Clock', ds_clock: 'Show the time and date',
+    sc_title: 'Size of each section', sc_hint: 'Text and icons in that part of the screen. 100 % is the normal size; text that no longer fits is shrunk or cut.',
+    sc_header: 'Header (clock and date)', sc_switches: 'Switches', sc_weather: 'Current weather', sc_forecast: 'Forecast',
+    sc_reset: 'Reset sizes to 100 %',
     rot_0: 'Landscape, USB port on the right (default)', rot_90: 'Portrait, USB port at the bottom',
     rot_180: 'Landscape, USB port on the left', rot_270: 'Portrait, USB port at the top',
     pv_title: 'Live preview', pv_hint: 'This is what the Kindle shows. It updates after you save.',
@@ -185,6 +193,7 @@ const STR = {
     err_invalid_language: 'Unknown language.', err_invalid_refresh: 'The weather refresh must be at least 1 minute.',
     err_invalid_rotation: 'Invalid rotation.', err_invalid_split: 'The split must be between 30 and 80 %.',
     err_invalid_columns: 'Columns must be between 1 and 4.', err_invalid_flash: 'The refresh interval cannot be negative.',
+    err_invalid_scale: 'The size of “{arg}” must be between 50 and 200 %.',
     err_ha_not_configured: 'Enter the Home Assistant address and token.',
     err_ha_token_rejected: 'Home Assistant rejected the token.',
     err_ha_unreachable: 'Cannot reach Home Assistant ({arg}).',
@@ -211,6 +220,9 @@ const STR = {
     ds_columns: 'Colonnes de tuiles', ds_flash: 'Rafraîchissement complet toutes les (minutes)',
     ds_flash_hint: 'Efface les images rémanentes par un flash. 0 = jamais.',
     ds_clock_label: 'Horloge', ds_clock: 'Afficher l’heure et la date',
+    sc_title: 'Taille de chaque section', sc_hint: 'Texte et icônes de cette partie de l’écran. 100 % est la taille normale ; le texte qui ne tient plus est réduit ou coupé.',
+    sc_header: 'En-tête (heure et date)', sc_switches: 'Interrupteurs', sc_weather: 'Météo actuelle', sc_forecast: 'Prévisions',
+    sc_reset: 'Remettre les tailles à 100 %',
     rot_0: 'Paysage, port USB à droite (par défaut)', rot_90: 'Portrait, port USB en bas',
     rot_180: 'Paysage, port USB à gauche', rot_270: 'Portrait, port USB en haut',
     pv_title: 'Aperçu en direct', pv_hint: 'Voici ce qu’affiche la Kindle. L’aperçu change après l’enregistrement.',
@@ -231,6 +243,7 @@ const STR = {
     err_invalid_language: 'Langue inconnue.', err_invalid_refresh: 'L’actualisation météo doit être d’au moins 1 minute.',
     err_invalid_rotation: 'Orientation invalide.', err_invalid_split: 'La part doit être entre 30 et 80 %.',
     err_invalid_columns: 'Il faut entre 1 et 4 colonnes.', err_invalid_flash: 'L’intervalle ne peut pas être négatif.',
+    err_invalid_scale: 'La taille de « {arg} » doit être entre 50 et 200 %.',
     err_ha_not_configured: 'Entrez l’adresse et le jeton de Home Assistant.',
     err_ha_token_rejected: 'Home Assistant a refusé le jeton.',
     err_ha_unreachable: 'Home Assistant est injoignable ({arg}).',
@@ -253,7 +266,9 @@ function t(key, vars = {}) {
 }
 function errText(body) {
   const key = body && body.error;
-  if (key && STR.en['err_' + key]) return t('err_' + key, { arg: body.arg || '' });
+  // invalid_scale names the section in English; show its label instead.
+  const arg = key === 'invalid_scale' && body.arg ? t('sc_' + body.arg) : body.arg;
+  if (key && STR.en['err_' + key]) return t('err_' + key, { arg: arg || '' });
   return t('err_unknown', { arg: key || '?' });
 }
 function msg(el, text, kind = '') { el.textContent = text; el.className = 'msg' + (kind ? ' ' + kind : ''); }
@@ -563,7 +578,32 @@ function renderDisplay() {
   $('ds-cols').value = d.columns;
   $('ds-flash').value = d.flash_minutes;
   $('ds-clock').checked = d.clock;
+  renderScales();
 }
+
+// Per-section size sliders, 50–200 %. Older configs have no scale.
+const SCALE_SECTIONS = ['header', 'switches', 'weather', 'forecast'];
+function renderScales() {
+  const d = cfg.display;
+  d.scale = Object.assign({ header: 1, switches: 1, weather: 1, forecast: 1 }, d.scale);
+  $('scales').replaceChildren(...SCALE_SECTIONS.map(k => {
+    const pct = Math.round((d.scale[k] || 1) * 100);
+    const val = el('b', { textContent: pct + ' %' });
+    const input = el('input', { type: 'range', id: 'sc-' + k, min: 50, max: 200, step: 5, value: pct, style: 'width:100%' });
+    input.addEventListener('input', () => {
+      d.scale[k] = input.value / 100;
+      val.textContent = input.value + ' %';
+      setDirty(true);
+    });
+    const label = el('label', { htmlFor: 'sc-' + k }, el('span', { textContent: t('sc_' + k) }), document.createTextNode(': '), val);
+    return el('div', {}, label, input);
+  }));
+}
+$('sc-reset').addEventListener('click', () => {
+  SCALE_SECTIONS.forEach(k => { cfg.display.scale[k] = 1; });
+  renderScales();
+  setDirty(true);
+});
 $('ds-split').addEventListener('input', e => { cfg.display.split = e.target.value / 100; $('ds-split-val').textContent = e.target.value + ' %'; setDirty(true); });
 $('ds-cols').addEventListener('change', e => { cfg.display.columns = +e.target.value; setDirty(true); });
 $('ds-flash').addEventListener('input', e => {

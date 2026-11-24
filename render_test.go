@@ -138,6 +138,14 @@ func TestGoldenFrames(t *testing.T) {
 
 	cases["fr_setup"] = Snapshot{Language: LangFR, Setup: true, Display: DefaultConfig().Display}
 
+	// Section sizes: bigger header and switches, smaller weather, bigger
+	// forecast, in both orientations.
+	for _, rot := range []int{0, 90} {
+		s = testSnapshot(t, LangEN, rot)
+		s.Display.Scale = Scale{Header: 1.3, Switches: 1.5, Weather: 0.7, Forecast: 1.25}
+		cases[fmt.Sprintf("en_%d_scaled", rot)] = s
+	}
+
 	for name, snap := range cases {
 		t.Run(name, func(t *testing.T) {
 			img, _ := r.Render(snap, "http://192.168.1.20:8080")
@@ -272,6 +280,51 @@ func TestRoundTemp(t *testing.T) {
 	for in, want := range map[string]string{"-2.4": "-2", "-0.4": "0", "3.5": "4", "12": "12", "": "", "n/a": "n/a"} {
 		if got := roundTemp(in); got != want {
 			t.Errorf("roundTemp(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Scale 1, and an unset scale from an older config, give exactly the
+// normal frame; other scales move the header and tiles.
+func TestScaleLayout(t *testing.T) {
+	r := NewRenderer(testIcon)
+	base := testSnapshot(t, LangEN, 0)
+	imgBase, lBase := r.Render(base, "")
+	old := base
+	old.Display.Scale = Scale{}
+	imgOld, lOld := r.Render(old, "")
+	if !bytes.Equal(imgBase.Pix, imgOld.Pix) || lBase.Header != lOld.Header {
+		t.Error("an unset scale doesn't draw the same frame as scale 1")
+	}
+
+	big := base
+	big.Display.Scale = Scale{Header: 1.5, Switches: 2, Weather: 1, Forecast: 1}
+	l := ComputeLayout(big)
+	if l.Header.Dy() != 144 {
+		t.Errorf("header at 150%% is %d px, want 144", l.Header.Dy())
+	}
+	if l.Switches.Min.Y <= lBase.Switches.Min.Y {
+		t.Error("a taller header didn't push the panes down")
+	}
+	// Tap matching follows the scaled layout.
+	for _, tile := range l.Tiles {
+		c := tile.Rect.Min.Add(tile.Rect.Size().Div(2))
+		px, py := toPanel(l.Rotation, c.X, c.Y)
+		if id, ok := l.HitTest(px, py); !ok || id != tile.ID {
+			t.Errorf("tap on %s hit %q", tile.ID, id)
+		}
+	}
+	// Every combination of extremes draws without panicking, in both
+	// languages and orientations.
+	for _, lang := range []string{LangEN, LangFR} {
+		for _, rot := range []int{0, 90} {
+			for _, v := range []float64{MinScale, MaxScale} {
+				s := testSnapshot(t, lang, rot)
+				s.Display.Scale = Scale{v, v, v, v}
+				s.HAError = "ha_token_rejected"
+				s.WeatherStale = true
+				r.Render(s, "")
+			}
 		}
 	}
 }

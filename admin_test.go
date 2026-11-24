@@ -154,6 +154,9 @@ func TestAdminConfigErrors(t *testing.T) {
 		{"invalid_columns", "", func(c map[string]any) { c["display"].(map[string]any)["columns"] = 9 }},
 		{"invalid_rotation", "", func(c map[string]any) { c["display"].(map[string]any)["rotation"] = 45 }},
 		{"invalid_flash", "", func(c map[string]any) { c["display"].(map[string]any)["flash_minutes"] = -1 }},
+		{"invalid_scale", "weather", func(c map[string]any) {
+			c["display"].(map[string]any)["scale"] = map[string]any{"header": 1, "switches": 1, "weather": 3, "forecast": 1}
+		}},
 		{"invalid_refresh", "", func(c map[string]any) { c["eccc"].(map[string]any)["refresh_seconds"] = 5 }},
 	}
 	for _, tc := range cases {
@@ -375,7 +378,7 @@ func TestSettingsPage(t *testing.T) {
 	keys := []string{"unauthorized", "forbidden", "bad_request", "config_conflict", "save_failed",
 		"ha_not_configured", "ha_token_rejected", "ha_unreachable", "sites_unavailable"}
 	for _, k := range []string{"invalid_url", "invalid_entity", "duplicate_entity", "invalid_language",
-		"invalid_refresh", "invalid_rotation", "invalid_split", "invalid_columns", "invalid_flash"} {
+		"invalid_refresh", "invalid_rotation", "invalid_split", "invalid_columns", "invalid_flash", "invalid_scale"} {
 		keys = append(keys, k)
 	}
 	page := string(b)

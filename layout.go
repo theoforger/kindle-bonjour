@@ -1,6 +1,9 @@
 package main
 
-import "image"
+import (
+	"image"
+	"math"
+)
 
 // The panel as FBInk and the touchscreen see it: portrait, upright with the
 // USB port at the bottom. Touch coordinates are panel pixels (Stage 0).
@@ -68,6 +71,15 @@ const (
 	paneDivide = 3           // divider line width
 )
 
+// scaled multiplies a size by a section scale. At 1 it returns v exactly,
+// so the normal layout is unchanged.
+func scaled(v int, s float64) int {
+	if s <= 0 || s == 1 {
+		return v
+	}
+	return int(math.Round(float64(v) * s))
+}
+
 // Tile is one switch's rectangle on the canvas.
 type Tile struct {
 	ID   string
@@ -95,8 +107,10 @@ func ComputeLayout(s Snapshot) Layout {
 	if s.Setup {
 		return l
 	}
-	l.Header = image.Rect(0, 0, w, headerH)
-	body := image.Rect(margin, headerH+margin, w-margin, h-margin)
+	sc := s.Display.Scale.Norm()
+	hh := scaled(headerH, sc.Header)
+	l.Header = image.Rect(0, 0, w, hh)
+	body := image.Rect(margin, hh+margin, w-margin, h-margin)
 	split := s.Display.Split
 	if split <= 0 {
 		split = 0.55
@@ -115,8 +129,9 @@ func ComputeLayout(s Snapshot) Layout {
 
 	grid := l.Switches
 	if s.HAError != "" {
-		l.Banner = image.Rect(grid.Min.X, grid.Min.Y, grid.Max.X, grid.Min.Y+bannerH)
-		grid.Min.Y += bannerH + tileGap
+		bh := scaled(bannerH, sc.Switches)
+		l.Banner = image.Rect(grid.Min.X, grid.Min.Y, grid.Max.X, grid.Min.Y+bh)
+		grid.Min.Y += bh + tileGap
 	}
 	n := len(s.Switches)
 	if n == 0 {
@@ -132,9 +147,7 @@ func ComputeLayout(s Snapshot) Layout {
 	rows := (n + cols - 1) / cols
 	tw := (grid.Dx() - (cols-1)*tileGap) / cols
 	th := (grid.Dy() - (rows-1)*tileGap) / rows
-	if th > maxTileH {
-		th = maxTileH
-	}
+	th = min(th, scaled(maxTileH, sc.Switches))
 	for i, sw := range s.Switches {
 		r, c := i/cols, i%cols
 		x := grid.Min.X + c*(tw+tileGap)

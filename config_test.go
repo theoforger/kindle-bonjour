@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -173,5 +175,32 @@ func TestGetReturnsCopy(t *testing.T) {
 	c.Entities[0].ID = "light.changed"
 	if s.Get().Entities[0].ID != "light.living_room" {
 		t.Fatal("Get exposed internal slice")
+	}
+}
+
+func TestScaleValidation(t *testing.T) {
+	c := DefaultConfig()
+	c.Display.Scale = Scale{Header: 0, Switches: 1.234, Weather: 0.5, Forecast: 2}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if want := (Scale{1, 1.23, 0.5, 2}); c.Display.Scale != want {
+		t.Errorf("normalized to %+v, want %+v", c.Display.Scale, want)
+	}
+	for _, bad := range []struct {
+		sc  Scale
+		arg string
+	}{
+		{Scale{0.4, 1, 1, 1}, "header"},
+		{Scale{1, 2.1, 1, 1}, "switches"},
+		{Scale{1, 1, -1, 1}, "weather"},
+		{Scale{1, 1, 1, math.NaN()}, "forecast"},
+	} {
+		c := DefaultConfig()
+		c.Display.Scale = bad.sc
+		var ve *ValidationError
+		if err := c.Validate(); !errors.As(err, &ve) || ve.Key != "invalid_scale" || ve.Arg != bad.arg {
+			t.Errorf("%+v: got %v, want invalid_scale %s", bad.sc, err, bad.arg)
+		}
 	}
 }

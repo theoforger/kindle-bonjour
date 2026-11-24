@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,34 @@ type DisplayConfig struct {
 	Columns      int     `json:"columns"`       // tile columns, 1..4
 	FlashMinutes int     `json:"flash_minutes"` // full refresh interval, 0 = never
 	Clock        bool    `json:"clock"`
+	Scale        Scale   `json:"scale"` // per-section size, 1 = normal
+}
+
+// Scale sizes each section of the frame: fonts, icons and the header
+// height. 1 is the normal size; 0 (an older config) also means 1.
+type Scale struct {
+	Header   float64 `json:"header"`   // clock, date, update time
+	Switches float64 `json:"switches"` // tiles and the HA error banner
+	Weather  float64 `json:"weather"`  // location, warnings, current conditions
+	Forecast float64 `json:"forecast"` // forecast rows
+}
+
+// Scale limits, inclusive.
+const (
+	MinScale = 0.5
+	MaxScale = 2.0
+)
+
+func normScale(v float64) float64 {
+	if v <= 0 {
+		return 1
+	}
+	return v
+}
+
+// Norm returns the scale with unset sections at 1.
+func (s Scale) Norm() Scale {
+	return Scale{normScale(s.Header), normScale(s.Switches), normScale(s.Weather), normScale(s.Forecast)}
 }
 
 // Languages the dashboard supports.
@@ -58,7 +87,8 @@ func DefaultConfig() Config {
 		Language: LangEN,
 		Entities: []Entity{},
 		ECCC:     ECCCConfig{RefreshSeconds: 600},
-		Display:  DisplayConfig{Rotation: 0, Split: 0.55, Columns: 2, FlashMinutes: 30, Clock: true},
+		Display: DisplayConfig{Rotation: 0, Split: 0.55, Columns: 2, FlashMinutes: 30, Clock: true,
+			Scale: Scale{1, 1, 1, 1}},
 	}
 }
 
@@ -151,6 +181,19 @@ func (c *Config) Validate() error {
 	}
 	if c.Display.FlashMinutes < 0 {
 		return verr("invalid_flash", "", "display.flash_minutes must not be negative")
+	}
+	sc := &c.Display.Scale
+	for _, f := range []struct {
+		name string
+		v    *float64
+	}{{"header", &sc.Header}, {"switches", &sc.Switches}, {"weather", &sc.Weather}, {"forecast", &sc.Forecast}} {
+		if *f.v == 0 {
+			*f.v = 1
+		}
+		*f.v = math.Round(*f.v*100) / 100
+		if !(*f.v >= MinScale && *f.v <= MaxScale) { // also rejects NaN
+			return verr("invalid_scale", f.name, fmt.Sprintf("display.scale.%s must be between %g and %g", f.name, MinScale, MaxScale))
+		}
 	}
 	return nil
 }

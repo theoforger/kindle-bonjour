@@ -59,7 +59,7 @@ A fullscreen, always-on **landscape** dashboard on a jailbroken Kindle Paperwhit
 - **Switches:** Search and filter HA entities, add them, rename, drag to reorder, remove.
 - **Language:** English / Français toggle. It switches the settings page itself, the frame text and the ECCC feed language together.
 - **Weather:** Province and city search, refresh interval.
-- **Display:** Rotation, left/right split, tile columns, flash interval, clock on/off.
+- **Display:** Rotation, left/right split, tile columns, flash interval, clock on/off, and a size (50–200 %) for each section: header, switches, current weather, forecast.
 - **Live preview:** `<img src="/frame.png">`, reloaded whenever the version changes.
 - **Access:** Optional admin password from `ADMIN_PASSWORD_FILE` (or `ADMIN_PASSWORD`), checked with HTTP Basic auth on `/settings` and `/api/admin/*`. It is set only in the environment, not on the page, so the page can't lock you out. The Kindle's routes (`/frame.png`, `/api/tap`, `/healthz`) stay open.
 
