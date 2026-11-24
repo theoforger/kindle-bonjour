@@ -32,7 +32,7 @@ A fullscreen, always-on **landscape** dashboard on a jailbroken Kindle Paperwhit
 
 ## 3. The frame (server-side drawing)
 - **Canvas:** drawn at the size the user sees, then turned into the 1072×1448 panel frame. Rotation (from settings) is how the Kindle is held, clockwise from the default landscape: 0 = landscape with the USB port on the right (default), 90 = portrait upright, 180 = landscape with the USB port on the left, 270 = portrait upside down. Landscape canvases are 1448×1072 with switches left and weather right; portrait canvases are 1072×1448 with switches on top and weather below (fewer forecast periods fit).
-- **Left pane:** switch tiles in a grid, with a configurable number of columns. Tiles show ON (filled black, white text), OFF (outlined), N/A (gray) or RUN (scenes, scripts and buttons). A dotted border marks a pending tap.
+- **Left pane:** switch tiles in a grid, with a configurable number of columns. Tiles show ON (filled black, white text), OFF (outlined), N/A (gray) or RUN (scenes, scripts, buttons and shell commands). Media players show PLAYING/PAUSED/ON/OFF and covers and valves OPEN/CLOSED. Any entity in a domain with a `toggle` service can be a tile, plus `shell_command` services. A dotted border marks a pending tap.
 - **Right pane:** current conditions with an icon, a warning banner and 6 forecast periods.
 - **Header:** clock (server time, minute resolution) and a small "last update" or "(old)" marker.
 - **E-ink rules:** pure black and white plus a few grays, no thin gray text, and large hit targets (at least about 9 mm, or roughly 110 px at 300 ppi).

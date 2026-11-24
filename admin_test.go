@@ -258,8 +258,8 @@ func TestAdminTestHA(t *testing.T) {
 	u := e.srv.URL + "/api/admin/test-ha"
 	// Empty fields use the saved connection.
 	code, out := adminDo(t, "POST", u, map[string]string{}, nil)
-	if code != 200 || out["ok"] != true || out["entities"].(float64) != 6 {
-		t.Fatalf("saved: %d %v", code, out) // 7 fake entities, minus the sensor
+	if code != 200 || out["ok"] != true || out["entities"].(float64) != 10 {
+		t.Fatalf("saved: %d %v", code, out) // 10 fake entities minus the sensor and lock, plus 2 shell commands
 	}
 	if code, out := adminDo(t, "POST", u, map[string]string{"token": "bad"}, nil); code != 502 || out["error"] != "ha_token_rejected" {
 		t.Fatalf("bad token: %d %v", code, out)
@@ -287,7 +287,8 @@ func TestAdminEntities(t *testing.T) {
 	for _, x := range out["entities"].([]any) {
 		ids = append(ids, x.(map[string]any)["id"].(string))
 	}
-	if strings.Join(ids, ",") != "input_boolean.guest_mode,light.kitchen,light.living_room,scene.movie_night,switch.fan,switch.porch" {
+	if strings.Join(ids, ",") != "cover.garage,input_boolean.guest_mode,light.kitchen,light.living_room,media_player.tv,scene.movie_night,"+
+		"shell_command.monitor_off,shell_command.restart_kindle,switch.fan,switch.porch" {
 		t.Fatalf("entities: %v", ids)
 	}
 	e.store.ClearToken()

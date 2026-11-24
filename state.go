@@ -203,7 +203,7 @@ func (a *App) publish(s Snapshot, fresh bool) uint64 {
 	for id, p := range a.pending {
 		sw, listed := states[id]
 		switch {
-		case !listed, now.Sub(p.since) > pendingMax:
+		case !listed, now.Sub(p.since) > pendingLimit(id, p):
 			delete(a.pending, id)
 			continue
 		case fresh && !p.doneAt.IsZero() && (sw.Action || sw.State != p.prev || now.Sub(p.doneAt) > pendingAfterDone):
@@ -220,6 +220,15 @@ func (a *App) publish(s Snapshot, fresh bool) uint64 {
 		a.last, a.hasLast = s0, true
 	}
 	return a.Hub.Publish(s)
+}
+
+// pendingLimit is how long a tap may stay pending. A shell command keeps
+// its border until HA answers, since HA answers only when it ends.
+func pendingLimit(id string, p *pendingTap) time.Duration {
+	if IsShellCommand(id) && p.doneAt.IsZero() {
+		return shellTimeout
+	}
+	return pendingMax
 }
 
 // republish publishes the last snapshot again with the current pending set.
@@ -307,7 +316,11 @@ func (a *App) Tap(id string) error {
 	a.republish()
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		limit := 10 * time.Second
+		if IsShellCommand(id) {
+			limit = shellTimeout // HA answers when the command ends
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), limit)
 		defer cancel()
 		// Not Toggle: doneAt must be set before the re-reads, or the first
 		// one can't clear the pending border.

@@ -11,10 +11,14 @@ import (
 // the chosen language and isn't translated here.
 var messages = map[string]map[string]string{
 	// Tile states.
-	"tile_on":  {LangEN: "ON", LangFR: "ALLUMÉ"},
-	"tile_off": {LangEN: "OFF", LangFR: "ÉTEINT"},
-	"tile_na":  {LangEN: "N/A", LangFR: "N/D"},
-	"tile_run": {LangEN: "RUN", LangFR: "LANCER"},
+	"tile_on":      {LangEN: "ON", LangFR: "ALLUMÉ"},
+	"tile_off":     {LangEN: "OFF", LangFR: "ÉTEINT"},
+	"tile_na":      {LangEN: "N/A", LangFR: "N/D"},
+	"tile_run":     {LangEN: "RUN", LangFR: "LANCER"},
+	"tile_open":    {LangEN: "OPEN", LangFR: "OUVERT"},
+	"tile_closed":  {LangEN: "CLOSED", LangFR: "FERMÉ"},
+	"tile_playing": {LangEN: "PLAYING", LangFR: "LECTURE"},
+	"tile_paused":  {LangEN: "PAUSED", LangFR: "PAUSE"},
 
 	// Header and weather pane.
 	"weather_old":     {LangEN: "(old)", LangFR: "(ancien)"},

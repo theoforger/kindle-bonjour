@@ -138,6 +138,14 @@ func TestGoldenFrames(t *testing.T) {
 
 	cases["fr_setup"] = Snapshot{Language: LangFR, Setup: true, Display: DefaultConfig().Display}
 
+	// Media player, cover and shell command tiles.
+	for _, lang := range []string{LangEN, LangFR} {
+		s = testSnapshot(t, lang, 0)
+		s.Switches = domainSwitches()
+		s.Display.Columns = 3
+		cases[lang+"_domains"] = s
+	}
+
 	// Section sizes: bigger header and switches, smaller weather, bigger
 	// forecast, in both orientations.
 	for _, rot := range []int{0, 90} {
@@ -265,6 +273,8 @@ func TestFrenchTextFits(t *testing.T) {
 				s.WeatherStale = true
 				s.HAError = "ha_token_rejected"
 				r.Render(s, "")
+				s.Switches = domainSwitches()
+				r.Render(s, "")
 				s.Weather = nil
 				r.Render(s, "")
 				r.Render(Snapshot{Language: lang, Setup: true}, "http://192.168.100.200:18080")
@@ -326,5 +336,17 @@ func TestScaleLayout(t *testing.T) {
 				r.Render(s, "")
 			}
 		}
+	}
+}
+
+// domainSwitches has one tile for each state word beyond ON/OFF.
+func domainSwitches() []SwitchState {
+	return []SwitchState{
+		{ID: "media_player.living_room_tv", Name: "Living room TV", State: "playing"},
+		{ID: "media_player.kitchen_speaker", Name: "Kitchen speaker", State: "paused"},
+		{ID: "media_player.bedroom", Name: "Bedroom speaker", State: "off"},
+		{ID: "cover.garage_door", Name: "Garage door", State: "open"},
+		{ID: "cover.blinds", Name: "Blinds", State: "closed"},
+		{ID: "shell_command.monitor_off", Name: "Monitor off", State: shellReady, Action: true},
 	}
 }

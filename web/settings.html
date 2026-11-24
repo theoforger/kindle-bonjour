@@ -89,6 +89,7 @@
     <p class="hint" id="ents-empty" data-t="sw_none">No switches yet. Add some below.</p>
     <label for="ent-search" data-t="sw_add">Add a switch</label>
     <input type="search" id="ent-search" autocomplete="off">
+    <p class="hint" data-t="sw_kinds">Anything Home Assistant can toggle (lights, switches, media players, covers…), plus scenes, scripts, buttons and shell commands, which run when tapped.</p>
     <ul class="list picker" id="ent-results"></ul>
     <p class="msg" id="ent-msg" aria-live="polite"></p>
   </section>
@@ -159,6 +160,7 @@ const STR = {
     ha_test: 'Test connection', ha_clear: 'Remove saved token', ha_testing: 'Testing…',
     ha_ok: 'Connected. {n} entities can be added.',
     sw_title: 'Switches', sw_none: 'No switches yet. Add some below.', sw_add: 'Add a switch',
+    sw_kinds: 'Anything Home Assistant can toggle (lights, switches, media players, covers…), plus scenes, scripts, buttons and shell commands, which run when tapped.',
     sw_search: 'Search by name or entity ID', sw_loading: 'Loading entities…', sw_nomatch: 'No matching entities.',
     sw_save_ha: 'Save the Home Assistant connection first.', sw_name: 'Name on the tile',
     sw_up: 'Move up', sw_down: 'Move down', sw_remove: 'Remove', sw_drag: 'Drag to reorder',
@@ -209,6 +211,7 @@ const STR = {
     ha_test: 'Tester la connexion', ha_clear: 'Supprimer le jeton enregistré', ha_testing: 'Test en cours…',
     ha_ok: 'Connecté. {n} entités peuvent être ajoutées.',
     sw_title: 'Interrupteurs', sw_none: 'Aucun interrupteur. Ajoutez-en ci-dessous.', sw_add: 'Ajouter un interrupteur',
+    sw_kinds: 'Tout ce que Home Assistant peut basculer (lumières, interrupteurs, lecteurs multimédias, volets…), ainsi que les scènes, scripts, boutons et commandes shell, qui s’exécutent au toucher.',
     sw_search: 'Chercher par nom ou identifiant', sw_loading: 'Chargement des entités…', sw_nomatch: 'Aucune entité correspondante.',
     sw_save_ha: 'Enregistrez d’abord la connexion à Home Assistant.', sw_name: 'Nom sur la tuile',
     sw_up: 'Monter', sw_down: 'Descendre', sw_remove: 'Retirer', sw_drag: 'Glisser pour réordonner',
@@ -510,7 +513,8 @@ function renderPicker() {
   if (!list.length) { ul.append(el('li', { className: 'empty', textContent: t('sw_nomatch') })); return; }
   for (const e of list) {
     const li = el('li', { tabIndex: 0 }, el('span', { textContent: e.name }), el('span', { className: 'sub', textContent: e.id }));
-    const add = () => { cfg.entities.push({ id: e.id, name: '' }); setDirty(true); renderEntities(); renderPicker(); };
+    // Shell commands have no friendly_name for the server to read later, so keep the picker's name.
+    const add = () => { cfg.entities.push({ id: e.id, name: e.domain === 'shell_command' ? e.name : '' }); setDirty(true); renderEntities(); renderPicker(); };
     li.onclick = add;
     li.onkeydown = k => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); add(); } };
     ul.append(li);

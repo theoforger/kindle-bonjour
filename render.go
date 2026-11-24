@@ -339,15 +339,15 @@ func clamp(v, lo, hi int) int { return max(lo, min(v, hi)) }
 func (c *canvas) drawTile(sw SwitchState, r image.Rectangle, pending bool) {
 	k := func(v int) int { return scaled(v, c.sc.Switches) }
 	var bg, fg uint8 = white, black
-	state := T(c.lang, "tile_off")
+	state := T(c.lang, sw.StateKey())
 	pill := false
 	switch {
 	case !sw.Available():
-		bg, state = grayNA, T(c.lang, "tile_na")
+		bg = grayNA
 	case sw.Action:
-		state, pill = T(c.lang, "tile_run"), true
+		pill = true
 	case sw.On():
-		bg, fg, state = black, white, T(c.lang, "tile_on")
+		bg, fg = black, white
 	}
 	c.fill(r, bg)
 	if bg != black {

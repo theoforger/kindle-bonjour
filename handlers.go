@@ -126,7 +126,11 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) toggle(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	limit := 10 * time.Second
+	if IsShellCommand(id) {
+		limit = 35 * time.Second // HA answers when the command ends; stay under WriteTimeout
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), limit)
 	defer cancel()
 	err := s.App.Toggle(ctx, id)
 	switch {

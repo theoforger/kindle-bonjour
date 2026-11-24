@@ -314,3 +314,52 @@ func TestDebugPage(t *testing.T) {
 		t.Fatalf("unknown path: %d", resp.StatusCode)
 	}
 }
+
+// Shell commands and media players work through the same tap path.
+func TestTapShellCommandAndMediaPlayer(t *testing.T) {
+	e := newEnv(t)
+	if err := e.store.Update(func(c *Config) error {
+		c.Entities = []Entity{{ID: "shell_command.monitor_off"}, {ID: "media_player.tv", Name: "TV"}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v := e.app.Refresh(context.Background())
+	e.frame(t, 0, "")
+	snap, _, _ := e.app.Hub.Current()
+	if sw := snap.Switches[0]; sw.State != shellReady || !sw.Action || sw.Name != "Monitor off" {
+		t.Fatalf("shell tile: %+v", sw)
+	}
+
+	x, y := tileCenter(t, snap, "shell_command.monitor_off")
+	if r := e.tap(t, x, y, v); r.ID != "shell_command.monitor_off" {
+		t.Fatalf("shell tap: %+v", r)
+	}
+	s := e.eventually(t, "shell command ran", func(s Snapshot) bool { return len(s.Pending) == 0 })
+	if calls := e.ha.callLog(); len(calls) != 1 || calls[0] != "/api/services/shell_command/monitor_off " {
+		t.Fatalf("calls %q", calls)
+	}
+
+	_, v, _ = e.app.Hub.Current()
+	e.frame(t, 0, "")
+	x, y = tileCenter(t, s, "media_player.tv")
+	if r := e.tap(t, x, y, v); r.ID != "media_player.tv" {
+		t.Fatalf("media tap: %+v", r)
+	}
+	s = e.eventually(t, "media player toggled", func(s Snapshot) bool { return len(s.Pending) == 0 })
+	if e.ha.get("media_player.tv") != "off" || s.Switches[1].On() {
+		t.Fatalf("not toggled: HA %s, snapshot %+v", e.ha.get("media_player.tv"), s.Switches[1])
+	}
+
+	// /api/toggle accepts a configured shell command too.
+	req, _ := http.NewRequest("POST", e.srv.URL+"/api/toggle?id=shell_command.monitor_off", nil)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("/api/toggle: %d", resp.StatusCode)
+	}
+}
