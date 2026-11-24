@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<siteData xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <location><continent>North America</continent><country code="ca">Canada</country>
+  <province code="on">Ontario</province><name code="s0000458" lat="43.74N" lon="79.37W">Toronto</name></location>
+ <warnings url="https://weather.gc.ca/"><event type="warning" priority="high" description="YELLOW WARNING - WIND"/></warnings>
+ <currentConditions>
+  <station code="wto" lat="43.67N" lon="79.40W">Toronto City</station>
+  <dateTime name="observation" zone="UTC" UTCOffset="0"><year>2026</year><textSummary>Monday November 23, 2026 at 18:00 UTC</textSummary></dateTime>
+  <dateTime name="observation" zone="EST" UTCOffset="-5"><year>2026</year><textSummary>Monday November 23, 2026 at 13:00 EST</textSummary></dateTime>
+  <condition>Mostly Cloudy</condition><iconCode format="gif">03</iconCode>
+  <temperature unitType="metric" units="C" qaValue="100">-2.4</temperature>
+  <dewpoint unitType="metric" units="C">-6.1</dewpoint>
+  <windChill unitType="metric">-8</windChill>
+  <pressure unitType="metric" units="kPa" change="0.1" tendency="rising">101.7</pressure>
+  <visibility unitType="metric" units="km">24.1</visibility>
+  <relativeHumidity units="%">74</relativeHumidity>
+  <wind><speed unitType="metric" units="km/h">22</speed><gust unitType="metric" units="km/h">38</gust><direction>WNW</direction><bearing units="degrees">290</bearing></wind>
+ </currentConditions>
+ <forecastGroup>
+  <forecast><period textForecastName="Today">Monday</period><textSummary>x</textSummary>
+   <abbreviatedForecast><iconCode format="gif">03</iconCode><pop units="%">30</pop><textSummary>Mostly cloudy</textSummary></abbreviatedForecast>
+   <temperatures><textSummary>High minus 1.</textSummary><temperature unitType="metric" units="C" class="high">-1</temperature></temperatures></forecast>
+  <forecast><period textForecastName="Tonight">Monday night</period>
+   <abbreviatedForecast><iconCode format="gif">33</iconCode><pop units="%"/><textSummary>Clear</textSummary></abbreviatedForecast>
+   <temperatures><temperature class="low">-8</temperature></temperatures></forecast>
+  <forecast><period textForecastName="Tuesday">Tuesday</period>
+   <abbreviatedForecast><iconCode format="gif">12</iconCode><pop units="%">70</pop><textSummary>Periods of snow</textSummary></abbreviatedForecast>
+   <temperatures><temperature class="high">0</temperature></temperatures></forecast>
+  <forecast><period textForecastName="Tuesday night">Tuesday night</period>
+   <abbreviatedForecast><iconCode format="gif">16</iconCode><pop units="%">40</pop><textSummary>Flurries</textSummary></abbreviatedForecast>
+   <temperatures><temperature class="low">-6</temperature></temperatures></forecast>
+  <forecast><period textForecastName="Wednesday">Wednesday</period>
+   <abbreviatedForecast><iconCode format="gif">02</iconCode><pop units="%"/><textSummary>A mix of sun and cloud</textSummary></abbreviatedForecast>
+   <temperatures><temperature class="high">2</temperature></temperatures></forecast>
+  <forecast><period textForecastName="Wednesday night">Wednesday night</period>
+   <abbreviatedForecast><iconCode format="gif">30</iconCode><pop units="%"/><textSummary>Clear</textSummary></abbreviatedForecast>
+   <temperatures><temperature class="low">-4</temperature></temperatures></forecast>
+  <forecast><period textForecastName="Thursday">Thursday</period>
+   <abbreviatedForecast><iconCode format="gif">10</iconCode><pop units="%"/><textSummary>Cloudy</textSummary></abbreviatedForecast>
+   <temperatures><temperature class="high">3</temperature></temperatures></forecast>
+ </forecastGroup>
+</siteData>

@@ -1,0 +1,25 @@
+# Prototype (Python server + browser page), kept locally for reference only
+/prototype/
+
+# Runtime data: config.json holds the HA token
+/data/
+config.json
+
+# Per-device Kindle settings (your server's LAN address)
+kindle/ha-dash/url.txt
+
+# Build output
+/kindle-bonjour
+/dist/
+*.test
+*.out
+
+# Logs and editor junk
+*.log
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Claude Code local settings
+.claude/settings.local.json

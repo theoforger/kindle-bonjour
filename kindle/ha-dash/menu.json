@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "name": "Home Dashboard",
+      "priority": 0,
+      "items": [
+        { "name": "Start (stay awake + open page)", "priority": 0, "action": "bin/start.sh", "exitmenu": true },
+        { "name": "Stop (allow sleep again)", "priority": 1, "action": "bin/stop.sh", "exitmenu": false }
+      ]
+    }
+  ]
+}
