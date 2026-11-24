@@ -1,0 +1,34 @@
+# Self-contained test stack: the server plus the fake Home Assistant from
+# testdata/mock_ha.py (token test-token). Uses a named volume, so ./data and
+# a real config are never touched.
+#
+#   docker compose -f compose.yaml -f compose.test.yaml up -d --build
+#   open http://127.0.0.1:8080/settings
+#   docker compose -f compose.yaml -f compose.test.yaml down -v   # -v wipes the test data
+
+services:
+  kindle-bonjour:
+    # The image's own non-root user owns the named volume.
+    user: "65532:65532"
+    volumes:
+      - test-data:/data
+    environment:
+      HA_URL: http://mock-ha:18123
+      HA_TOKEN: test-token
+    depends_on:
+      mock-ha:
+        condition: service_started
+
+  mock-ha:
+    image: docker.io/library/python:3-alpine
+    restart: unless-stopped
+    user: "65534:65534"
+    command: ["python3", "-u", "/mock_ha.py"]
+    environment:
+      MOCK_HA_HOST: 0.0.0.0
+    volumes:
+      - ./testdata/mock_ha.py:/mock_ha.py:ro
+    read_only: true
+
+volumes:
+  test-data:

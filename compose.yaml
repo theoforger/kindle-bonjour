@@ -1,0 +1,48 @@
+# kindle-bonjour: Home Assistant + ECCC weather dashboard for a Kindle.
+#
+#   mkdir -p data          # create it yourself, so it is owned by you, not root
+#   docker compose up -d
+#   open http://<BIND_IP>:8080/settings
+#
+# Settings go in a .env file next to this one (see .env.example).
+
+services:
+  kindle-bonjour:
+    build: .
+    image: ${IMAGE:-kindle-bonjour:latest}
+    restart: unless-stopped
+    # Run as the owner of ./data. The image's own user (65532) is used if
+    # you mount a named volume instead.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      # Bind to this host's LAN IP only. The default, loopback, is not
+      # reachable from the Kindle: set BIND_IP in .env.
+      - "${BIND_IP:-127.0.0.1}:${HOST_PORT:-8080}:8080"
+    volumes:
+      # config.json (holds the HA token, written 0600), the icon cache and
+      # the ECCC site list. Back it up.
+      - ./data:/data
+    environment:
+      TZ: ${TZ:-America/Toronto}
+      # Seed the first config only (ignored once data/config.json exists).
+      # Use HA's LAN IP, not homeassistant.local: mDNS rarely works here.
+      HA_URL: ${HA_URL:-}
+      HA_TOKEN: ${HA_TOKEN:-}
+      # Password for /settings and /api/admin/*: uncomment the secret below
+      # and put the password in ./admin_password.txt.
+      # ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+    # secrets:
+    #   - admin_password
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "/kindle-bonjour", "-healthcheck"]
+      interval: 30s
+      timeout: 6s
+      start_period: 10s
+      retries: 3
+
+# secrets:
+#   admin_password:
+#     file: ./admin_password.txt

@@ -64,7 +64,7 @@ A fullscreen, always-on **landscape** dashboard on a jailbroken Kindle Paperwhit
 - **Access:** Optional admin password from `ADMIN_PASSWORD_FILE` (or `ADMIN_PASSWORD`), checked with HTTP Basic auth on `/settings` and `/api/admin/*`. It is set only in the environment, not on the page, so the page can't lock you out. The Kindle's routes (`/frame.png`, `/api/tap`, `/healthz`) stay open.
 
 ## 6. Docker
-- **Image:** Multi-stage build, with `golang:alpine` as the build stage (`CGO_ENABLED=0`). The runtime is `scratch` or distroless, with CA certificates (needed for HTTPS to ECCC). Import `time/tzdata` so `TZ` works. Run as non-root. Add a `-healthcheck` flag, since there's no `curl` in the image.
+- **Image:** Multi-stage build, with `golang:alpine` as the build stage (`CGO_ENABLED=0`). The runtime is distroless (`static-debian13:nonroot`), with CA certificates (needed for HTTPS to ECCC). Import `time/tzdata` so `TZ` works. Run as non-root. Add a `-healthcheck` flag, since there's no `curl` in the image.
 - **Multi-arch:** Build amd64, arm64 and armv7 with `buildx`. Optionally publish to GHCR via GitHub Actions.
 - **Compose:**
   - Bind the port to your LAN IP only.

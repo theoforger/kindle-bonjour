@@ -147,10 +147,20 @@ Kindle (`kindle/ha-dash/`):
 
 **Goal:** An image you can ship.
 
-- [ ] Multi-stage Dockerfile: `CGO_ENABLED=0`, distroless or scratch runtime with CA certificates, `time/tzdata`, non-root user, `-healthcheck` flag.
-- [ ] `compose.yaml`: port bound to the LAN IP, `./data:/data`, `TZ`, `ADMIN_PASSWORD_FILE`, `restart: unless-stopped`.
-- [ ] `compose.test.yaml` with a mock HA service.
-- [ ] `buildx` builds for amd64, arm64 and armv7. GitHub Actions publishing to GHCR is optional.
+- [x] Multi-stage Dockerfile: `CGO_ENABLED=0`, distroless or scratch runtime with CA certificates, `time/tzdata`, non-root user, `-healthcheck` flag.
+- [x] `compose.yaml`: port bound to the LAN IP, `./data:/data`, `TZ`, `ADMIN_PASSWORD_FILE`, `restart: unless-stopped`.
+- [x] `compose.test.yaml` with a mock HA service.
+- [x] `buildx` builds for amd64, arm64 and armv7. GitHub Actions publishing to GHCR is optional (workflow written, never run).
+- [ ] **Run with real Docker.** Everything was checked with rootless podman 6.1 and docker-compose 5.8 (no Docker on the dev machine).
+
+**Notes (2026-11-23):**
+- **Image:** `golang:1.27.4-alpine` build stage on `$BUILDPLATFORM`, cross-compiled with `GOOS`/`GOARCH`/`GOARM`, so arm64 and armv7 build without QEMU. Runtime is `gcr.io/distroless/static-debian13:nonroot` (CA certificates, uid 65532, no shell), with `/data` owned by 65532 so a named volume works out of the box. About 13 MB. `.dockerignore` lets only `go.mod`, `go.sum`, non-test `*.go` and `web/` into the context.
+- **`-healthcheck`:** `GET /healthz` on the `-addr` port (loopback for `:8080`), exit 0 on `200`. Used by the Dockerfile `HEALTHCHECK` and the compose healthcheck. (Podman's OCI image format drops `HEALTHCHECK`; the compose one covers that.)
+- **Data directory check:** the server now writes a test file in `/data` at start and exits with a clear message (uid, and "chown it or set `user:`") if it can't, instead of failing on the first settings save.
+- **`compose.yaml`:** `${BIND_IP:-127.0.0.1}:${HOST_PORT:-8080}:8080`. The default is loopback, so nothing is exposed until you set `BIND_IP` in `.env` (see `.env.example`). Runs as `${PUID:-1000}:${PGID:-1000}` so a bind-mounted `./data` owned by you is writable. **Create `data/` before the first `up`**, or Docker creates it as root. `HA_URL`/`HA_TOKEN` seed the first config. The admin password is a commented-out compose secret (`./admin_password.txt` → `ADMIN_PASSWORD_FILE`). Hardening: `read_only`, `cap_drop: [ALL]`, `no-new-privileges`.
+- **`compose.test.yaml`** (overlay: `-f compose.yaml -f compose.test.yaml`): adds `mock-ha` (`python:3-alpine` running `testdata/mock_ha.py`, which now takes `MOCK_HA_HOST`), seeds `HA_URL=http://mock-ha:18123` and the test token, and swaps `./data` for a named volume, so a real config is never touched. `down -v` wipes it.
+- **Checked** (podman): healthy; process is uid 65532 (`nonroot`) on a read-only root filesystem; seeded from the environment; HA reached over the compose network; ECCC site search, live Toronto weather (French) and six icons fetched from inside the container; frame rendered; toggle worked; `config.json` and the cache files are `0600`, owned by 65532; settings survived `down && up`. `ADMIN_PASSWORD_FILE` gave `401` without credentials, `200` with them, and `/frame.png` stayed open. A read-only `/data` stops the server with the new message. arm64 and armv7 images built, and the binaries are the right architecture (`file`); they weren't run (no QEMU here).
+- **Not checked:** real Docker and `docker buildx` (the Dockerfile is plain BuildKit syntax); the bind-mounted `./data` with `PUID` under rootless podman, where uid 1000 in the container is not your host user (use Docker, a named volume, or podman's `userns_mode: keep-id`); the GitHub Actions workflow (`.github/workflows/docker.yml`: test, then multi-arch build, push to `ghcr.io/<repo>` on `main` and `v*` tags).
 
 **Exit:** The container is healthy, runs as non-root, settings survive `docker compose down && up`, and it fetches real ECCC data from inside the container.
 

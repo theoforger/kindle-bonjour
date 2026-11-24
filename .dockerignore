@@ -1,0 +1,8 @@
+# Only go.mod, go.sum, *.go and web/ are copied into the image; keep the
+# build context small and keep secrets out of it.
+*
+!go.mod
+!go.sum
+!*.go
+!web/
+*_test.go

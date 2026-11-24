@@ -23,3 +23,7 @@ kindle/ha-dash/url.txt
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Docker: local compose settings and the admin password secret
+.env
+admin_password.txt

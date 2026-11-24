@@ -24,4 +24,5 @@ class H(BaseHTTPRequestHandler):
         if self.path.endswith("homeassistant/toggle") and eid in S:
             S[eid] = "off" if S[eid] == "on" else "on"
         self._j([])
-ThreadingHTTPServer(("127.0.0.1", 18123), H).serve_forever()
+import os
+ThreadingHTTPServer((os.environ.get("MOCK_HA_HOST", "127.0.0.1"), 18123), H).serve_forever()
