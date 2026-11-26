@@ -204,3 +204,20 @@ func TestScaleValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestForecastValidation(t *testing.T) {
+	c := DefaultConfig()
+	c.Display.Forecast = ""
+	if err := c.Validate(); err != nil || c.Display.Forecast != ForecastDaily {
+		t.Errorf("empty: %v %q", err, c.Display.Forecast)
+	}
+	c.Display.Forecast = ForecastHourly
+	if err := c.Validate(); err != nil || c.Display.Forecast != ForecastHourly {
+		t.Errorf("hourly: %v %q", err, c.Display.Forecast)
+	}
+	c.Display.Forecast = "weekly"
+	var ve *ValidationError
+	if err := c.Validate(); !errors.As(err, &ve) || ve.Key != "invalid_forecast" {
+		t.Errorf("weekly: %v", err)
+	}
+}

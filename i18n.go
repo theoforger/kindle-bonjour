@@ -82,6 +82,14 @@ func formatDate(lang string, t time.Time) string {
 	return t.Format("Mon Jan 2")
 }
 
+// formatWeekday gives a short weekday: "Tue" or "mar.".
+func formatWeekday(lang string, t time.Time) string {
+	if lang == LangFR {
+		return frDays[t.Weekday()]
+	}
+	return t.Format("Mon")
+}
+
 // localTime rewrites an "HH:MM ZONE" string (Weather.Observed) for lang.
 func localTime(lang, s string) string {
 	if lang != LangFR {

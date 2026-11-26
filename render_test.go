@@ -154,6 +154,13 @@ func TestGoldenFrames(t *testing.T) {
 		cases[fmt.Sprintf("en_%d_scaled", rot)] = s
 	}
 
+	// Hourly forecast. Only the French test file has hours.
+	for _, rot := range []int{0, 90} {
+		s = testSnapshot(t, LangFR, rot)
+		s.Display.Forecast = ForecastHourly
+		cases[fmt.Sprintf("fr_%d_hourly", rot)] = s
+	}
+
 	for name, snap := range cases {
 		t.Run(name, func(t *testing.T) {
 			img, _ := r.Render(snap, "http://192.168.1.20:8080")
@@ -162,6 +169,18 @@ func TestGoldenFrames(t *testing.T) {
 			}
 			checkGolden(t, name, img)
 		})
+	}
+}
+
+// Hourly wanted but the feed has none: the daily forecast is shown.
+func TestHourlyFallsBackToDaily(t *testing.T) {
+	r := NewRenderer(testIcon)
+	daily, _ := r.Render(testSnapshot(t, LangEN, 0), "")
+	s := testSnapshot(t, LangEN, 0)
+	s.Display.Forecast = ForecastHourly
+	hourly, _ := r.Render(s, "")
+	if !bytes.Equal(daily.Pix, hourly.Pix) {
+		t.Error("hourly without hours differs from the daily frame")
 	}
 }
 

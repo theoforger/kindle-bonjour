@@ -177,7 +177,7 @@ func (a *App) Refresh(ctx context.Context) uint64 {
 		a.mu.Unlock()
 	}
 	ws := a.Weather.Status(cfg.WeatherSource())
-	s.Weather, s.WeatherStale = ws.Weather, ws.Stale
+	s.Weather, s.WeatherStale = ws.Weather.Upcoming(now), ws.Stale
 	if !ws.FetchedAt.IsZero() {
 		s.WeatherUpdated = formatClock(lang, ws.FetchedAt.In(now.Location()))
 	}

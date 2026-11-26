@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +43,7 @@ type Weather struct {
 	Wind       Wind     `json:"wind"`
 	Warnings   []string `json:"warnings"`
 	Forecast   []Period `json:"forecast"`
+	Hourly     []Hour   `json:"hourly"`
 }
 
 // Wind is kept as parts; the frame adds the localized labels (see WindText).
@@ -66,6 +69,35 @@ type Period struct {
 	POP     string `json:"pop"`
 	Temp    string `json:"temp"`
 	Class   string `json:"class"` // high or low
+}
+
+// Hour is one hourly forecast. Time is the start of the hour in the
+// feed's local zone (the server's zone if the feed doesn't give one).
+type Hour struct {
+	Time      time.Time `json:"time"`
+	Icon      string    `json:"icon"`
+	Condition string    `json:"condition"`
+	Temp      string    `json:"temp"`
+	POP       string    `json:"pop"` // likelihood of precipitation, %
+	Wind      Wind      `json:"wind"`
+}
+
+// Upcoming returns w without the hourly forecasts for hours that ended
+// before now. w itself is not changed.
+func (w *Weather) Upcoming(now time.Time) *Weather {
+	if w == nil {
+		return nil
+	}
+	i := 0
+	for i < len(w.Hourly) && !w.Hourly[i].Time.Add(time.Hour).After(now) {
+		i++
+	}
+	if i == 0 {
+		return w
+	}
+	c := *w
+	c.Hourly = w.Hourly[i:]
+	return &c
 }
 
 // XML shapes. encoding/xml skips any element not named here, so new
@@ -120,6 +152,24 @@ type xSiteData struct {
 			Class string `xml:"class,attr"`
 		} `xml:"temperatures>temperature"`
 	} `xml:"forecastGroup>forecast"`
+	Hourly struct {
+		DateTimes []struct {
+			Zone      string `xml:"zone,attr"`
+			UTCOffset string `xml:"UTCOffset,attr"`
+		} `xml:"dateTime"`
+		Hours []struct {
+			Time      string `xml:"dateTimeUTC,attr"`
+			Condition string `xml:"condition"`
+			IconCode  string `xml:"iconCode"`
+			Temp      string `xml:"temperature"`
+			LOP       string `xml:"lop"`
+			Wind      struct {
+				Speed     string `xml:"speed"`
+				Gust      string `xml:"gust"`
+				Direction string `xml:"direction"`
+			} `xml:"wind"`
+		} `xml:"hourlyForecast"`
+	} `xml:"hourlyForecastGroup"`
 }
 
 // ParseCitypage parses an ECCC citypage XML document.
@@ -131,7 +181,7 @@ func ParseCitypage(data []byte) (*Weather, error) {
 		return nil, fmt.Errorf("parse citypage: %w", err)
 	}
 	t := strings.TrimSpace
-	w := &Weather{Location: t(x.Location.Name), Warnings: []string{}, Forecast: []Period{}}
+	w := &Weather{Location: t(x.Location.Name), Warnings: []string{}, Forecast: []Period{}, Hourly: []Hour{}}
 	if c := x.Current; c != nil {
 		w.Station = t(c.Station)
 		for _, dt := range c.DateTimes {
@@ -171,6 +221,26 @@ func ParseCitypage(data []byte) (*Weather, error) {
 			p.Temp, p.Class = t(f.Temps[0].Value), t(f.Temps[0].Class)
 		}
 		w.Forecast = append(w.Forecast, p)
+	}
+	loc := time.Local
+	for _, dt := range x.Hourly.DateTimes {
+		if dt.Zone == "" || dt.Zone == "UTC" {
+			continue
+		}
+		// UTCOffset is in hours and may be fractional (-3.5 in Newfoundland).
+		if h, err := strconv.ParseFloat(t(dt.UTCOffset), 64); err == nil {
+			loc = time.FixedZone(t(dt.Zone), int(math.Round(h*3600)))
+			break
+		}
+	}
+	for _, h := range x.Hourly.Hours {
+		ts, err := time.Parse("200601021504", t(h.Time))
+		if err != nil {
+			continue
+		}
+		w.Hourly = append(w.Hourly, Hour{Time: ts.In(loc), Icon: t(h.IconCode), Condition: t(h.Condition),
+			Temp: t(h.Temp), POP: t(h.LOP),
+			Wind: Wind{Direction: t(h.Wind.Direction), Speed: t(h.Wind.Speed), Gust: t(h.Wind.Gust)}})
 	}
 	for _, ev := range x.Warnings.Events {
 		if s := t(ev.Description); s != "" {

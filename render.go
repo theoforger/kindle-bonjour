@@ -94,7 +94,7 @@ func (r *Renderer) Render(s Snapshot, host string) (*image.Gray, Layout) {
 		c.drawHeader(s, l.Header)
 		c.drawSwitches(s, l)
 		c.fill(l.Divider, black)
-		c.drawWeather(s.Weather, l.Weather)
+		c.drawWeather(s.Weather, l.Weather, s.Display.Forecast == ForecastHourly)
 	}
 	return rotateToPanel(c.img, l.Rotation), l
 }
@@ -393,7 +393,9 @@ func roundTemp(s string) string {
 	return strconv.Itoa(n) // never "-0": Itoa(0) is "0"
 }
 
-func (c *canvas) drawWeather(w *Weather, r image.Rectangle) {
+// drawWeather draws the current conditions and then the daily forecast,
+// or the hourly one when hourly is set and the feed has it.
+func (c *canvas) drawWeather(w *Weather, r image.Rectangle, hourly bool) {
 	k := func(v int) int { return scaled(v, c.sc.Weather) }
 	if w == nil {
 		f := c.face(true, k(36))
@@ -476,6 +478,20 @@ func (c *canvas) drawWeather(w *Weather, r image.Rectangle) {
 	c.fill(image.Rect(r.Min.X, y, r.Max.X, y+3), black)
 	y += 3 + 6
 	avail := r.Max.Y - y
+	if hourly && len(w.Hourly) > 0 {
+		// Hours are shorter rows, so more of them fit.
+		n := min(12, len(w.Hourly), avail/scaled(60, c.sc.Forecast))
+		if n <= 0 {
+			return
+		}
+		rowH := min(avail/n, scaled(84, c.sc.Forecast))
+		for i := 0; i < n; i++ {
+			c.drawHour(w.Hourly[i], i > 0 && w.Hourly[i].Time.Day() != w.Hourly[i-1].Time.Day(),
+				image.Rect(r.Min.X, y, r.Max.X, y+rowH))
+			y += rowH
+		}
+		return
+	}
 	minRow := scaled(84, c.sc.Forecast)
 	n := min(6, len(w.Forecast), avail/minRow)
 	if n <= 0 {
@@ -485,6 +501,47 @@ func (c *canvas) drawWeather(w *Weather, r image.Rectangle) {
 	for i := 0; i < n; i++ {
 		c.drawPeriod(w.Forecast[i], image.Rect(r.Min.X, y, r.Max.X, y+rowH))
 		y += rowH
+	}
+}
+
+// drawHour draws one hourly row: icon, time, condition, then the chance
+// of precipitation and the temperature on the right. newDay adds the
+// weekday to the time at the first hour of a new day.
+func (c *canvas) drawHour(h Hour, newDay bool, r image.Rectangle) {
+	k := func(v int) int { return scaled(v, c.sc.Forecast) }
+	ic := min(r.Dy()-8, k(64))
+	c.icon(h.Icon, image.Rect(r.Min.X, r.Min.Y+(r.Dy()-ic)/2, r.Min.X+ic, r.Min.Y+(r.Dy()+ic)/2))
+	x := r.Min.X + ic + 16
+	mid := r.Min.Y + r.Dy()/2
+	size := clamp(r.Dy()*40/100, k(20), k(30))
+
+	label := formatClock(c.lang, h.Time)
+	if newDay {
+		label = formatWeekday(c.lang, h.Time) + " " + label
+	}
+	bf := c.face(true, size)
+	// Fixed width for the time so the conditions line up.
+	tw := max(width(bf, formatClock(c.lang, time.Date(2000, 1, 1, 23, 0, 0, 0, time.UTC))), width(bf, label))
+	c.textMid(bf, x, mid, label, black)
+	x += tw + 20
+
+	right := r.Max.X
+	if h.Temp != "" {
+		t := roundTemp(h.Temp) + "°"
+		right -= width(bf, t)
+		c.textMid(bf, right, mid, t, black)
+		right -= 20
+	}
+	if h.POP != "" && h.POP != "0" {
+		pf := c.face(false, size)
+		t := T(c.lang, "pop", h.POP)
+		right -= width(pf, t)
+		c.textMid(pf, right, mid, t, black)
+		right -= 20
+	}
+	if h.Condition != "" && right > x {
+		cf, ct := c.fit(false, size, min(k(18), size), h.Condition, right-x, "hour_condition")
+		c.textMid(cf, x, mid, ct, black)
 	}
 }
 

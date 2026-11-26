@@ -36,8 +36,15 @@ type DisplayConfig struct {
 	Columns      int     `json:"columns"`       // tile columns, 1..4
 	FlashMinutes int     `json:"flash_minutes"` // full refresh interval, 0 = never
 	Clock        bool    `json:"clock"`
-	Scale        Scale   `json:"scale"` // per-section size, 1 = normal
+	Forecast     string  `json:"forecast"` // ForecastDaily or ForecastHourly
+	Scale        Scale   `json:"scale"`    // per-section size, 1 = normal
 }
+
+// Forecast kinds the weather pane can show.
+const (
+	ForecastDaily  = "daily"  // ECCC day and night periods
+	ForecastHourly = "hourly" // the next hours
+)
 
 // Scale sizes each section of the frame: fonts, icons and the header
 // height. 1 is the normal size; 0 (an older config) also means 1.
@@ -88,7 +95,7 @@ func DefaultConfig() Config {
 		Entities: []Entity{},
 		ECCC:     ECCCConfig{RefreshSeconds: 600},
 		Display: DisplayConfig{Rotation: 0, Split: 0.55, Columns: 2, FlashMinutes: 30, Clock: true,
-			Scale: Scale{1, 1, 1, 1}},
+			Forecast: ForecastDaily, Scale: Scale{1, 1, 1, 1}},
 	}
 }
 
@@ -181,6 +188,13 @@ func (c *Config) Validate() error {
 	}
 	if c.Display.FlashMinutes < 0 {
 		return verr("invalid_flash", "", "display.flash_minutes must not be negative")
+	}
+	switch c.Display.Forecast {
+	case "": // older configs
+		c.Display.Forecast = ForecastDaily
+	case ForecastDaily, ForecastHourly:
+	default:
+		return verr("invalid_forecast", "", "display.forecast must be daily or hourly")
 	}
 	sc := &c.Display.Scale
 	for _, f := range []struct {

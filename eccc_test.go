@@ -93,6 +93,60 @@ func TestParseCitypageFrench(t *testing.T) {
 	}
 }
 
+func TestParseHourly(t *testing.T) {
+	b, err := os.ReadFile("testdata/eccc/citypage_fr.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := ParseCitypage(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(w.Hourly) != 24 {
+		t.Fatalf("%d hours", len(w.Hourly))
+	}
+	h := w.Hourly[0]
+	// 02:00 UTC is 21:00 HNE (UTC-5) the day before.
+	if got := h.Time.Format("2006-01-02 15:04 MST -0700"); got != "2026-11-23 21:00 HNE -0500" {
+		t.Errorf("time %s", got)
+	}
+	if h.Icon != "38" || h.Temp != "3" || h.POP != "40" || h.Condition != "Possibilité d'averses de neige" ||
+		h.Wind != (Wind{Direction: "NO", Speed: "20", Gust: "40"}) {
+		t.Errorf("hour %+v", h)
+	}
+	if w.Hourly[1].Time.Sub(h.Time) != time.Hour {
+		t.Errorf("second hour at %v", w.Hourly[1].Time)
+	}
+
+	// The English test file has no hourly group.
+	en, _ := os.ReadFile("testdata/eccc/citypage_en.xml")
+	if w, err := ParseCitypage(en); err != nil || w.Hourly == nil || len(w.Hourly) != 0 {
+		t.Errorf("english: %v %v", w.Hourly, err)
+	}
+}
+
+func TestWeatherUpcoming(t *testing.T) {
+	base := time.Date(2026, 11, 24, 2, 0, 0, 0, time.UTC)
+	w := &Weather{Location: "x"}
+	for i := 0; i < 4; i++ {
+		w.Hourly = append(w.Hourly, Hour{Time: base.Add(time.Duration(i) * time.Hour)})
+	}
+	if got := w.Upcoming(base.Add(-time.Minute)); got != w {
+		t.Error("nothing past: want the same weather")
+	}
+	// At 03:30 the 02:00 hour is over; 03:00 is still current.
+	got := w.Upcoming(base.Add(90 * time.Minute))
+	if len(got.Hourly) != 3 || !got.Hourly[0].Time.Equal(base.Add(time.Hour)) || got.Location != "x" {
+		t.Errorf("got %+v", got.Hourly)
+	}
+	if len(w.Hourly) != 4 {
+		t.Error("Upcoming changed its receiver")
+	}
+	if (*Weather)(nil).Upcoming(base) != nil {
+		t.Error("nil weather")
+	}
+}
+
 func TestParseIgnoresUnknownElements(t *testing.T) {
 	b := fixture(t)
 	b = bytes.Replace(b, []byte("<currentConditions>"),

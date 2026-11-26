@@ -127,6 +127,13 @@
         <label data-t="ds_clock_label">Clock</label>
         <label class="check"><input type="checkbox" id="ds-clock"> <span data-t="ds_clock">Show the time and date</span></label>
       </div>
+      <div>
+        <label for="ds-forecast" data-t="ds_forecast">Forecast</label>
+        <select id="ds-forecast">
+          <option value="daily" data-t="ds_forecast_daily">Daily</option>
+          <option value="hourly" data-t="ds_forecast_hourly">Hourly</option>
+        </select>
+      </div>
     </div>
     <h3 data-t="sc_title">Size of each section</h3>
     <p class="hint" data-t="sc_hint">Text and icons in that part of the screen. 100 % is the normal size; text that no longer fits is shrunk or cut.</p>
@@ -171,6 +178,7 @@ const STR = {
     ds_title: 'Display', ds_rotation: 'How the Kindle is held', ds_split: "Switches' share of the screen",
     ds_columns: 'Tile columns', ds_flash: 'Full refresh every (minutes)', ds_flash_hint: 'Clears ghosting with a flash. 0 = never.',
     ds_clock_label: 'Clock', ds_clock: 'Show the time and date',
+    ds_forecast: 'Forecast', ds_forecast_daily: 'Daily', ds_forecast_hourly: 'Hourly',
     sc_title: 'Size of each section', sc_hint: 'Text and icons in that part of the screen. 100 % is the normal size; text that no longer fits is shrunk or cut.',
     sc_header: 'Header (clock and date)', sc_switches: 'Switches', sc_weather: 'Current weather', sc_forecast: 'Forecast',
     sc_reset: 'Reset sizes to 100 %',
@@ -194,6 +202,7 @@ const STR = {
     err_invalid_entity: 'Invalid entity ID: {arg}', err_duplicate_entity: '{arg} is on the list twice.',
     err_invalid_language: 'Unknown language.', err_invalid_refresh: 'The weather refresh must be at least 1 minute.',
     err_invalid_rotation: 'Invalid rotation.', err_invalid_split: 'The split must be between 30 and 80 %.',
+    err_invalid_forecast: 'The forecast must be daily or hourly.',
     err_invalid_columns: 'Columns must be between 1 and 4.', err_invalid_flash: 'The refresh interval cannot be negative.',
     err_invalid_scale: 'The size of “{arg}” must be between 50 and 200 %.',
     err_ha_not_configured: 'Enter the Home Assistant address and token.',
@@ -223,6 +232,7 @@ const STR = {
     ds_columns: 'Colonnes de tuiles', ds_flash: 'Rafraîchissement complet toutes les (minutes)',
     ds_flash_hint: 'Efface les images rémanentes par un flash. 0 = jamais.',
     ds_clock_label: 'Horloge', ds_clock: 'Afficher l’heure et la date',
+    ds_forecast: 'Prévisions', ds_forecast_daily: 'Quotidiennes', ds_forecast_hourly: 'Horaires',
     sc_title: 'Taille de chaque section', sc_hint: 'Texte et icônes de cette partie de l’écran. 100 % est la taille normale ; le texte qui ne tient plus est réduit ou coupé.',
     sc_header: 'En-tête (heure et date)', sc_switches: 'Interrupteurs', sc_weather: 'Météo actuelle', sc_forecast: 'Prévisions',
     sc_reset: 'Remettre les tailles à 100 %',
@@ -245,6 +255,7 @@ const STR = {
     err_invalid_entity: 'Identifiant d’entité invalide : {arg}', err_duplicate_entity: '{arg} est deux fois dans la liste.',
     err_invalid_language: 'Langue inconnue.', err_invalid_refresh: 'L’actualisation météo doit être d’au moins 1 minute.',
     err_invalid_rotation: 'Orientation invalide.', err_invalid_split: 'La part doit être entre 30 et 80 %.',
+    err_invalid_forecast: 'Les prévisions doivent être quotidiennes ou horaires.',
     err_invalid_columns: 'Il faut entre 1 et 4 colonnes.', err_invalid_flash: 'L’intervalle ne peut pas être négatif.',
     err_invalid_scale: 'La taille de « {arg} » doit être entre 50 et 200 %.',
     err_ha_not_configured: 'Entrez l’adresse et le jeton de Home Assistant.',
@@ -582,6 +593,7 @@ function renderDisplay() {
   $('ds-cols').value = d.columns;
   $('ds-flash').value = d.flash_minutes;
   $('ds-clock').checked = d.clock;
+  $('ds-forecast').value = d.forecast || 'daily';
   renderScales();
 }
 
@@ -616,6 +628,7 @@ $('ds-flash').addEventListener('input', e => {
   setDirty(true);
 });
 $('ds-clock').addEventListener('change', e => { cfg.display.clock = e.target.checked; setDirty(true); });
+$('ds-forecast').addEventListener('change', e => { cfg.display.forecast = e.target.value; setDirty(true); });
 
 // ---- live preview ----
 // /frame.png is the panel image (portrait, already rotated for the Kindle).
