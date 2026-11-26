@@ -30,8 +30,9 @@ func TestParseCitypage(t *testing.T) {
 	}
 	checks := map[string][2]string{
 		"location":  {w.Location, "Toronto"},
+		// Only the English text has the time here: "... at 18:00 UTC".
+		"observed":  {w.Observed.Format(time.RFC3339), "2026-11-23T18:00:00Z"},
 		"station":   {w.Station, "Toronto City"},
-		"observed":  {w.Observed, "13:00 EST"},
 		"condition": {w.Condition, "Mostly Cloudy"},
 		"icon":      {w.Icon, "03"},
 		"temp":      {w.Temp, "-2.4"},
@@ -77,9 +78,9 @@ func TestParseCitypageFrench(t *testing.T) {
 		w.Condition != "Partiellement nuageux" || w.Temp != "2.4" || w.Tendency != "à la hausse" {
 		t.Errorf("current %+v", w)
 	}
-	// French text has no " at "; the time comes from the <hour>/<minute> fields.
-	if w.Observed != "20:00 HNE" {
-		t.Errorf("observed %q", w.Observed)
+	// 20:00 HNE is 01:00 UTC the next day.
+	if want := time.Date(2026, 11, 24, 1, 0, 0, 0, time.UTC); !w.Observed.Equal(want) || w.Observed.Location() != time.UTC {
+		t.Errorf("observed %v", w.Observed)
 	}
 	if w.Wind != (Wind{Direction: "ONO", Speed: "22", Gust: "36"}) {
 		t.Errorf("wind %+v", w.Wind)
@@ -106,8 +107,7 @@ func TestParseHourly(t *testing.T) {
 		t.Fatalf("%d hours", len(w.Hourly))
 	}
 	h := w.Hourly[0]
-	// 02:00 UTC is 21:00 HNE (UTC-5) the day before.
-	if got := h.Time.Format("2006-01-02 15:04 MST -0700"); got != "2026-11-23 21:00 HNE -0500" {
+	if got := h.Time.Format(time.RFC3339); got != "2026-11-24T02:00:00Z" {
 		t.Errorf("time %s", got)
 	}
 	if h.Icon != "38" || h.Temp != "3" || h.POP != "40" || h.Condition != "Possibilité d'averses de neige" ||
@@ -125,25 +125,45 @@ func TestParseHourly(t *testing.T) {
 	}
 }
 
-func TestWeatherUpcoming(t *testing.T) {
+func TestWeatherLocal(t *testing.T) {
 	base := time.Date(2026, 11, 24, 2, 0, 0, 0, time.UTC)
 	w := &Weather{Location: "x"}
 	for i := 0; i < 4; i++ {
 		w.Hourly = append(w.Hourly, Hour{Time: base.Add(time.Duration(i) * time.Hour)})
 	}
-	if got := w.Upcoming(base.Add(-time.Minute)); got != w {
-		t.Error("nothing past: want the same weather")
+	nst := time.FixedZone("NST", -7*3600/2) // Newfoundland, UTC-3:30
+	// At 03:30 UTC the 02:00 hour is over; 03:00 is still current.
+	got := w.Local(base.Add(90 * time.Minute).In(nst))
+	if len(got.Hourly) != 3 || got.Location != "x" {
+		t.Fatalf("got %+v", got.Hourly)
 	}
-	// At 03:30 the 02:00 hour is over; 03:00 is still current.
-	got := w.Upcoming(base.Add(90 * time.Minute))
-	if len(got.Hourly) != 3 || !got.Hourly[0].Time.Equal(base.Add(time.Hour)) || got.Location != "x" {
-		t.Errorf("got %+v", got.Hourly)
+	if s := got.Hourly[0].Time.Format("2006-01-02 15:04 MST"); s != "2026-11-23 23:30 NST" {
+		t.Errorf("first hour %s", s)
 	}
-	if len(w.Hourly) != 4 {
-		t.Error("Upcoming changed its receiver")
+	if len(w.Hourly) != 4 || w.Hourly[1].Time.Location() != time.UTC {
+		t.Error("Local changed its receiver")
 	}
-	if (*Weather)(nil).Upcoming(base) != nil {
+	if (*Weather)(nil).Local(base) != nil {
 		t.Error("nil weather")
+	}
+}
+
+// Feed times with only a station zone and offset, or fractional offsets.
+func TestDateTimeInstant(t *testing.T) {
+	want := time.Date(2026, 11, 24, 1, 30, 0, 0, time.UTC)
+	for _, d := range []xDateTime{
+		{Zone: "UTC", UTCOffset: "0", TimeStamp: "20261124013000"},
+		{Zone: "HNT", UTCOffset: "-3.5", TimeStamp: "20261123220000"},
+		{Zone: "EST", UTCOffset: "-5", Year: "2026", Month: "11", Day: "23", Hour: "20", Minute: "30"},
+		{Zone: "UTC", Summary: "Tuesday November 24, 2026 at 01:30 UTC"},
+	} {
+		if got, ok := d.instant(); !ok || !got.Equal(want) {
+			t.Errorf("%+v: %v %v", d, got, ok)
+		}
+	}
+	// A station zone without an offset can't be placed in time.
+	if _, ok := (xDateTime{Zone: "EST", Hour: "20", Minute: "00"}).instant(); ok {
+		t.Error("EST without offset")
 	}
 }
 

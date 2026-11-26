@@ -291,8 +291,9 @@ func (c *canvas) drawHeader(s Snapshot, r image.Rectangle) {
 	if s.Clock != "" {
 		x += c.textMid(c.face(true, k(60)), x, mid, s.Clock, black) + k(28)
 		if s.Date != "" {
-			c.textMid(c.face(false, k(36)), x, mid, s.Date, black)
+			x += c.textMid(c.face(false, k(36)), x, mid, s.Date, black)
 		}
+		x += k(28)
 	}
 	right := r.Max.X - margin
 	if s.WeatherStale {
@@ -303,10 +304,32 @@ func (c *canvas) drawHeader(s Snapshot, r image.Rectangle) {
 		c.textMid(f, box.Min.X+k(12), mid, old, white)
 		right = box.Min.X - k(16)
 	}
+	// Observation time and update time, stacked and right-aligned.
+	var lines []string
+	if s.WeatherObs != "" {
+		lines = append(lines, T(c.lang, "observed_at", s.WeatherObs))
+	}
 	if s.WeatherUpdated != "" {
-		f := c.face(false, k(28))
-		t := T(c.lang, "weather_updated", s.WeatherUpdated)
-		c.textMid(f, right-width(f, t), mid, t, black)
+		lines = append(lines, T(c.lang, "weather_updated", s.WeatherUpdated))
+	}
+	if len(lines) > 0 && right > x {
+		hi := k(28)
+		if len(lines) > 1 {
+			hi = k(26)
+		}
+		f := c.face(false, hi)
+		for _, ln := range lines {
+			if lf, _ := c.fit(false, hi, k(18), ln, right-x, "header_time"); lineH(lf) < lineH(f) {
+				f = lf // same size for both lines
+			}
+		}
+		lh := lineH(f)
+		y := mid - lh*len(lines)/2
+		for _, ln := range lines {
+			t := c.truncate(f, ln, right-x, "header_time")
+			c.textMid(f, right-width(f, t), y+lh/2, t, black)
+			y += lh
+		}
 	}
 	c.fill(image.Rect(r.Min.X, r.Max.Y-3, r.Max.X, r.Max.Y), black)
 }
@@ -465,12 +488,6 @@ func (c *canvas) drawWeather(w *Weather, r image.Rectangle, hourly bool) {
 		dy += ascent(df)
 		c.text(df, dx, dy, dt, black)
 		dy += descent(df) + 6
-	}
-	if w.Observed != "" {
-		of, ot := c.fit(false, k(24), k(18), T(c.lang, "observed_at", localTime(c.lang, w.Observed)), dw, "observed")
-		dy += ascent(of)
-		c.text(of, dx, dy, ot, black)
-		dy += descent(of)
 	}
 	y = max(dy, y+curH) + 14
 

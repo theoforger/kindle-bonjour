@@ -29,21 +29,21 @@ const (
 
 // Weather is the parsed citypage, reduced to what the frame shows.
 type Weather struct {
-	Location   string   `json:"location"`
-	Station    string   `json:"station"`
-	Observed   string   `json:"observed"` // local time, e.g. "13:00 EST" or "13:00 HNE"
-	Condition  string   `json:"condition"`
-	Icon       string   `json:"icon"`
-	Temp       string   `json:"temp"`
-	Feels      string   `json:"feels"` // wind chill or humidex
-	Humidity   string   `json:"humidity"`
-	Pressure   string   `json:"pressure"`
-	Tendency   string   `json:"tendency"`
-	Visibility string   `json:"visibility"`
-	Wind       Wind     `json:"wind"`
-	Warnings   []string `json:"warnings"`
-	Forecast   []Period `json:"forecast"`
-	Hourly     []Hour   `json:"hourly"`
+	Location   string    `json:"location"`
+	Station    string    `json:"station"`
+	Observed   time.Time `json:"observed"` // UTC; zero if the feed has no usable time
+	Condition  string    `json:"condition"`
+	Icon       string    `json:"icon"`
+	Temp       string    `json:"temp"`
+	Feels      string    `json:"feels"` // wind chill or humidex
+	Humidity   string    `json:"humidity"`
+	Pressure   string    `json:"pressure"`
+	Tendency   string    `json:"tendency"`
+	Visibility string    `json:"visibility"`
+	Wind       Wind      `json:"wind"`
+	Warnings   []string  `json:"warnings"`
+	Forecast   []Period  `json:"forecast"`
+	Hourly     []Hour    `json:"hourly"`
 }
 
 // Wind is kept as parts; the frame adds the localized labels (see WindText).
@@ -71,8 +71,8 @@ type Period struct {
 	Class   string `json:"class"` // high or low
 }
 
-// Hour is one hourly forecast. Time is the start of the hour in the
-// feed's local zone (the server's zone if the feed doesn't give one).
+// Hour is one hourly forecast. Time is the start of the hour, in UTC as
+// parsed; Local moves it to the display zone.
 type Hour struct {
 	Time      time.Time `json:"time"`
 	Icon      string    `json:"icon"`
@@ -82,21 +82,21 @@ type Hour struct {
 	Wind      Wind      `json:"wind"`
 }
 
-// Upcoming returns w without the hourly forecasts for hours that ended
-// before now. w itself is not changed.
-func (w *Weather) Upcoming(now time.Time) *Weather {
+// Local returns a copy of w ready to draw at now: hours that ended before
+// now are dropped and the hourly times are in now's zone (the server's TZ,
+// the same zone as the clock). w itself is not changed.
+func (w *Weather) Local(now time.Time) *Weather {
 	if w == nil {
 		return nil
 	}
-	i := 0
-	for i < len(w.Hourly) && !w.Hourly[i].Time.Add(time.Hour).After(now) {
-		i++
-	}
-	if i == 0 {
-		return w
-	}
 	c := *w
-	c.Hourly = w.Hourly[i:]
+	c.Hourly = []Hour{}
+	for _, h := range w.Hourly {
+		if h.Time.Add(time.Hour).After(now) {
+			h.Time = h.Time.In(now.Location())
+			c.Hourly = append(c.Hourly, h)
+		}
+	}
 	return &c
 }
 
@@ -112,20 +112,14 @@ type xSiteData struct {
 		} `xml:"event"`
 	} `xml:"warnings"`
 	Current *struct {
-		Station   string `xml:"station"`
-		DateTimes []struct {
-			Name    string `xml:"name,attr"`
-			Zone    string `xml:"zone,attr"`
-			Hour    string `xml:"hour"`
-			Minute  string `xml:"minute"`
-			Summary string `xml:"textSummary"`
-		} `xml:"dateTime"`
-		Condition string `xml:"condition"`
-		IconCode  string `xml:"iconCode"`
-		Temp      string `xml:"temperature"`
-		WindChill string `xml:"windChill"`
-		Humidex   string `xml:"humidex"`
-		Humidity  string `xml:"relativeHumidity"`
+		Station   string      `xml:"station"`
+		DateTimes []xDateTime `xml:"dateTime"`
+		Condition string      `xml:"condition"`
+		IconCode  string      `xml:"iconCode"`
+		Temp      string      `xml:"temperature"`
+		WindChill string      `xml:"windChill"`
+		Humidex   string      `xml:"humidex"`
+		Humidity  string      `xml:"relativeHumidity"`
 		Pressure  struct {
 			Value    string `xml:",chardata"`
 			Tendency string `xml:"tendency,attr"`
@@ -153,10 +147,6 @@ type xSiteData struct {
 		} `xml:"temperatures>temperature"`
 	} `xml:"forecastGroup>forecast"`
 	Hourly struct {
-		DateTimes []struct {
-			Zone      string `xml:"zone,attr"`
-			UTCOffset string `xml:"UTCOffset,attr"`
-		} `xml:"dateTime"`
 		Hours []struct {
 			Time      string `xml:"dateTimeUTC,attr"`
 			Condition string `xml:"condition"`
@@ -172,6 +162,48 @@ type xSiteData struct {
 	} `xml:"hourlyForecastGroup"`
 }
 
+type xDateTime struct {
+	Name      string `xml:"name,attr"`
+	Zone      string `xml:"zone,attr"`
+	UTCOffset string `xml:"UTCOffset,attr"`
+	Year      string `xml:"year"`
+	Month     string `xml:"month"`
+	Day       string `xml:"day"`
+	Hour      string `xml:"hour"`
+	Minute    string `xml:"minute"`
+	TimeStamp string `xml:"timeStamp"`
+	Summary   string `xml:"textSummary"`
+}
+
+// instant turns a feed dateTime into a UTC time. It uses the timeStamp,
+// then the year..minute fields, both read in the zone's UTCOffset (hours,
+// possibly fractional: -3.5 in Newfoundland), then for UTC entries the
+// English text, e.g. "Monday November 23, 2026 at 18:00 UTC".
+func (d xDateTime) instant() (time.Time, bool) {
+	t := strings.TrimSpace
+	off, err := strconv.ParseFloat(t(d.UTCOffset), 64)
+	if err != nil {
+		if t(d.Zone) != "UTC" {
+			return time.Time{}, false
+		}
+		off = 0
+	}
+	loc := time.FixedZone(t(d.Zone), int(math.Round(off*3600)))
+	if ts, err := time.ParseInLocation("20060102150405", t(d.TimeStamp), loc); err == nil {
+		return ts.UTC(), true
+	}
+	fields := t(d.Year) + "-" + t(d.Month) + "-" + t(d.Day) + " " + t(d.Hour) + ":" + t(d.Minute)
+	if ts, err := time.ParseInLocation("2006-1-2 15:04", fields, loc); err == nil {
+		return ts.UTC(), true
+	}
+	if t(d.Zone) == "UTC" {
+		if ts, err := time.Parse("Monday January 2, 2006 at 15:04 MST", t(d.Summary)); err == nil {
+			return ts.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
 // ParseCitypage parses an ECCC citypage XML document.
 func ParseCitypage(data []byte) (*Weather, error) {
 	var x xSiteData
@@ -184,20 +216,16 @@ func ParseCitypage(data []byte) (*Weather, error) {
 	w := &Weather{Location: t(x.Location.Name), Warnings: []string{}, Forecast: []Period{}, Hourly: []Hour{}}
 	if c := x.Current; c != nil {
 		w.Station = t(c.Station)
+		// The feed gives the observation in UTC and in the station's zone;
+		// either one will do.
 		for _, dt := range c.DateTimes {
-			if dt.Name != "observation" || dt.Zone == "" || dt.Zone == "UTC" {
+			if dt.Name != "observation" {
 				continue
 			}
-			if h, m := t(dt.Hour), t(dt.Minute); h != "" && m != "" {
-				w.Observed = h + ":" + m + " " + dt.Zone
-				continue
+			if ts, ok := dt.instant(); ok {
+				w.Observed = ts
+				break
 			}
-			// No structured time: use the text, e.g. "Monday ... at 13:00 EST".
-			s := t(dt.Summary)
-			if _, after, ok := strings.Cut(s, " at "); ok {
-				s = after
-			}
-			w.Observed = s
 		}
 		w.Condition = t(c.Condition)
 		w.Icon = t(c.IconCode)
@@ -222,23 +250,12 @@ func ParseCitypage(data []byte) (*Weather, error) {
 		}
 		w.Forecast = append(w.Forecast, p)
 	}
-	loc := time.Local
-	for _, dt := range x.Hourly.DateTimes {
-		if dt.Zone == "" || dt.Zone == "UTC" {
-			continue
-		}
-		// UTCOffset is in hours and may be fractional (-3.5 in Newfoundland).
-		if h, err := strconv.ParseFloat(t(dt.UTCOffset), 64); err == nil {
-			loc = time.FixedZone(t(dt.Zone), int(math.Round(h*3600)))
-			break
-		}
-	}
 	for _, h := range x.Hourly.Hours {
-		ts, err := time.Parse("200601021504", t(h.Time))
+		ts, err := time.Parse("200601021504", t(h.Time)) // UTC
 		if err != nil {
 			continue
 		}
-		w.Hourly = append(w.Hourly, Hour{Time: ts.In(loc), Icon: t(h.IconCode), Condition: t(h.Condition),
+		w.Hourly = append(w.Hourly, Hour{Time: ts, Icon: t(h.IconCode), Condition: t(h.Condition),
 			Temp: t(h.Temp), POP: t(h.LOP),
 			Wind: Wind{Direction: t(h.Wind.Direction), Speed: t(h.Wind.Speed), Gust: t(h.Wind.Gust)}})
 	}

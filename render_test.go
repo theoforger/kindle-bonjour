@@ -61,13 +61,14 @@ func testSnapshot(t *testing.T, lang string, rot int) Snapshot {
 			{ID: "scene.movie_night", Name: "Movie night", State: "scening", Action: true},
 			{ID: "input_boolean.guest_mode", Name: "Guest mode", State: "on"},
 		},
-		Weather:        testWeather(t, lang),
+		Weather:        testWeather(t, lang).Local(testTime),
 		WeatherUpdated: formatClock(lang, testTime),
 		Clock:          formatClock(lang, testTime),
 		Date:           formatDate(lang, testTime),
 		Display:        DefaultConfig().Display,
 	}
 	s.Display.Rotation = rot
+	s.WeatherObs = formatClock(lang, s.Weather.Observed.In(testTime.Location()))
 	return s
 }
 
@@ -132,7 +133,7 @@ func TestGoldenFrames(t *testing.T) {
 	s = testSnapshot(t, LangFR, 0)
 	s.Pending = []string{"light.living_room", "scene.movie_night"}
 	s.Weather = nil
-	s.WeatherUpdated = ""
+	s.WeatherUpdated, s.WeatherObs = "", ""
 	s.Clock, s.Date = "", ""
 	cases["fr_pending_noweather"] = s
 

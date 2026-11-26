@@ -22,7 +22,7 @@ var messages = map[string]map[string]string{
 
 	// Header and weather pane.
 	"weather_old":     {LangEN: "(old)", LangFR: "(ancien)"},
-	"weather_updated": {LangEN: "Updated %s", LangFR: "Mis à jour à %s"},
+	"weather_updated": {LangEN: "Updated at %s", LangFR: "Mis à jour à %s"},
 	"weather_none":    {LangEN: "No weather data", LangFR: "Aucune donnée météo"},
 	"observed_at":     {LangEN: "Observed at %s", LangFR: "Observé à %s"},
 	"feels_like":      {LangEN: "Feels like %s°", LangFR: "Ressenti %s°"},
@@ -88,19 +88,6 @@ func formatWeekday(lang string, t time.Time) string {
 		return frDays[t.Weekday()]
 	}
 	return t.Format("Mon")
-}
-
-// localTime rewrites an "HH:MM ZONE" string (Weather.Observed) for lang.
-func localTime(lang, s string) string {
-	if lang != LangFR {
-		return s
-	}
-	hm, zone, _ := strings.Cut(s, " ")
-	h, m, ok := strings.Cut(hm, ":")
-	if !ok || len(h) != 2 || len(m) != 2 {
-		return s
-	}
-	return strings.TrimSpace(h + " h " + m + " " + zone)
 }
 
 // WindText gives e.g. "WNW 22 km/h, gust 38" or "ONO 22 km/h, rafales 38".

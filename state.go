@@ -20,8 +20,9 @@ type Snapshot struct {
 	HAError        string        `json:"ha_error,omitempty"` // message key, e.g. ha_unreachable
 	Weather        *Weather      `json:"weather"`
 	WeatherStale   bool          `json:"weather_stale"`
-	WeatherUpdated string        `json:"weather_updated,omitempty"` // local time of last good fetch, localized
-	Clock          string        `json:"clock,omitempty"`           // localized time, empty when the clock is off
+	WeatherUpdated string        `json:"weather_updated,omitempty"`  // local time of last good fetch, localized
+	WeatherObs     string        `json:"weather_observed,omitempty"` // local time of the observation, localized
+	Clock          string        `json:"clock,omitempty"`            // localized time, empty when the clock is off
 	Date           string        `json:"date,omitempty"`
 	Display        DisplayConfig `json:"display"`
 	Pending        []string      `json:"pending,omitempty"` // tapped tiles waiting for HA (dotted border)
@@ -177,7 +178,10 @@ func (a *App) Refresh(ctx context.Context) uint64 {
 		a.mu.Unlock()
 	}
 	ws := a.Weather.Status(cfg.WeatherSource())
-	s.Weather, s.WeatherStale = ws.Weather.Upcoming(now), ws.Stale
+	s.Weather, s.WeatherStale = ws.Weather.Local(now), ws.Stale
+	if s.Weather != nil && !s.Weather.Observed.IsZero() {
+		s.WeatherObs = formatClock(lang, s.Weather.Observed.In(now.Location()))
+	}
 	if !ws.FetchedAt.IsZero() {
 		s.WeatherUpdated = formatClock(lang, ws.FetchedAt.In(now.Location()))
 	}
